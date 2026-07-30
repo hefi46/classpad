@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pygame
 
+from launcher import process_manager
 from launcher.button import Button
 from launcher.config import build_button_grid
 from launcher.plugin_manager import scan_plugins
@@ -43,9 +44,16 @@ def main():
                 for button in buttons:
                     if button.contains(event.pos):
                         click_sound.play()
-                        # Phase 5 wires this to process_manager.launch(); placeholder
-                        # for now so the grid is clickable end to end.
-                        print(f"Launch requested: {button.plugin.id}")
+                        process = process_manager.launch(button.plugin)
+                        process_manager.wait_for_exit(process)
+                        # Nothing pumped the event queue while we were blocked in
+                        # wait_for_exit(), so clicks made on the covered launcher
+                        # window (or against its own now-stale button rects) are
+                        # sitting in the queue — discard them, or the first queued
+                        # click instantly relaunches the app that just closed.
+                        pygame.event.clear()
+                        for other in buttons:
+                            other.set_hovered(False)
 
         screen.fill(BACKGROUND_COLOR)
         for button in buttons:
