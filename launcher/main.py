@@ -40,7 +40,7 @@ def main():
             elif event.type == pygame.MOUSEMOTION:
                 for button in buttons:
                     button.set_hovered(button.contains(event.pos))
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
                 for button in buttons:
                     if button.contains(event.pos):
                         click_sound.play()
