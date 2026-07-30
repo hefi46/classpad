@@ -1,0 +1,9 @@
+{
+  "id": "abc-iview-bluey",
+  "name": "Bluey (ABC iview)",
+  "version": "1.0.0",
+  "type": "website",
+  "url": "https://iview.abc.net.au/show/bluey",
+  "icon": "icon.png",
+  "description": "Real-site performance test candidate — not yet a curated/approved site, see pre-build-decisions.md §3"
+}

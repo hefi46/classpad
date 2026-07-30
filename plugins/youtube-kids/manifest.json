@@ -1,0 +1,9 @@
+{
+  "id": "youtube-kids",
+  "name": "YouTube Kids",
+  "version": "1.0.0",
+  "type": "website",
+  "url": "https://www.youtube.com/kids",
+  "icon": "icon.png",
+  "description": "Real-site performance test candidate — not yet a curated/approved site, see pre-build-decisions.md §3"
+}
