@@ -18,7 +18,9 @@ A central server (Docker, local network) manages app configuration and deploymen
 - Uses EWMH strut hints (`_NET_WM_STRUT_PARTIAL`) to reserve screen space at the top
 - Set `_NET_WM_STATE_ABOVE` (always-on-top)
 - Height: ~55px at top of screen
-- Contains: Home button, clock, "Call Teacher" button, current activity label
+- Contains: Home button, clock, volume control, "Call Teacher" button, current activity label
+- Volume control is not optional — classroom audio complaints are the most common real-world support request for this kind of deployment
+- "Call Teacher" must debounce/rate-limit (e.g. disable for N seconds after press) — a child will press it repeatedly otherwise
 - Clicking Home kills all child processes and signals the launcher to return to the home screen
 - All other apps (Pygame launcher, Chromium, TuxPaint etc.) run in the remaining screen area below the bar
 
@@ -54,6 +56,8 @@ my-plugin/
 }
 ```
 
+**Security:** plugin zips are trusted-admin input, not arbitrary uploads — `install.sh` runs with the same privileges as the install process (expected: root), so anyone who can push a plugin owns every machine. `plugin-install.sh` must reject archive entries containing `..` or absolute paths before extraction (path traversal), regardless of whether extraction uses `unzip` or Python's `zipfile`. Plugin upload is admin-portal-only (see Central Server / Admin Portal below) — there is no public or unauthenticated upload path.
+
 For website buttons:
 ```json
 {
@@ -72,8 +76,10 @@ For website buttons:
 - The launcher tracks the process and detects when it exits
 - For `type: website`: launches Chromium with `--app=URL --start-maximized --no-first-run --disable-session-crashed-bubble --disable-features=TranslateUI --overscroll-history-navigation=0 --disable-pinch --incognito`
 - Do NOT use `--kiosk` for websites — it overrides EWMH struts and covers the bar
+- Website navigation containment: `--app` mode does not stop a child following an in-page link off the curated site. Deploy a Chromium managed policy (`system/chromium/policies/managed/classpad-policy.json`) setting `URLAllowlist` — do not rely on `--app` mode or Zscaler alone to contain navigation.
 - For `type: app`: launches the binary directly
 - For `type: custom`: launches a local Python/HTML app from the plugin directory
+- **Security:** `launch_command` (and any per-plugin flags) comes from a server-controlled manifest. `process_manager.py` must invoke it as an argv list with `shell=False` — never interpolate it into a shell string. Treat it as untrusted input from the same trust boundary as the plugin zip itself.
 
 ### Central Server
 - **Docker container** on local school network server
@@ -91,7 +97,18 @@ Two-layer recovery system:
 1. **xbindkeys** daemon running at X session level — listens for `RShift+RCtrl+F12` regardless of which app is in front. When triggered, kills all known child processes by name and the systemd service auto-restarts the launcher.
 2. **Admin portal** "Return to Home" button per machine — sets a flag in config response, machine detects it on next poll and clears all child processes.
 
-Process kill list: `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris`, plus any processes launched from plugin install.sh scripts.
+Process kill list: `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris`, plus any processes launched from plugin install.sh scripts. Each plugin manifest that spawns a long-running process outside `launch_command` itself (e.g. a bundled local server) must declare its process name explicitly — the kill list cannot infer names for arbitrary future plugins.
+
+---
+
+## Open Risks — Verify Before Building Further
+
+These are unverified assumptions the design depends on. Gated verification steps live in `TODO.md` Phase 2 — do not proceed past that gate until resolved.
+
+- **Struts vs. real fullscreen.** The persistent-bar design assumes `_NET_WM_STRUT_PARTIAL` + `_NET_WM_STATE_ABOVE` keeps the bar visible over any child window. That's untested against windows that go genuinely fullscreen (not just maximised) — GCompris defaults to fullscreen, TuxMath can too. A true fullscreen window is commonly promoted above struts by the WM. **Fallback if this fails:** Openbox per-application rules in `rc.xml` forcing `<maximized>yes</maximized>` and denying fullscreen/decorations for known plugin processes, rather than relying on struts alone.
+- **Recovery hotkey vs. keyboard grabs.** `xbindkeys` registers a passive root-window grab. An app holding an active keyboard grab (common in fullscreen games) can swallow `RShift+RCtrl+F12` before it reaches xbindkeys — which would fail exactly when a child is stuck in a fullscreen app. Verify this with a real xbindkeys binding under a real fullscreen app, not just at idle.
+- **Website content containment is undecided.** `--app --incognito` plus Zscaler does not stop in-page navigation to uncontrolled content — a child can follow a link off a curated site. Decide on a Chromium managed policy (`URLAllowlist`/`URLBlocklist` in `/etc/chromium/policies/managed/`, see `system/chromium/policies/managed/`) rather than relying on `--app` mode or network filtering alone.
+- **Plugin trust model.** Plugin zips can carry an `install.sh` that runs with elevated privileges via `plugin-install.sh`. Treat plugin upload as an admin-only, trusted-input operation (enforced in the admin portal, Phase 8) — there is no sandboxing of plugin code in this design.
 
 ---
 
@@ -172,7 +189,7 @@ classpad/
 │   ├── memory-game/           # Custom app
 │   ├── xylophone/             # Custom app
 │   ├── storybook/             # Custom app (served from server)
-│   └── emotion-checkin/       # Custom app
+│   └── emotion-checkin/       # Custom app — v1/v2 scope not yet confirmed, no TODO phase assigned
 ├── system/                    # OS configuration files
 │   ├── lightdm/
 │   │   └── lightdm.conf
@@ -180,8 +197,12 @@ classpad/
 │   │   └── autostart          # Starts bar.py then launcher service
 │   ├── systemd/
 │   │   └── classpad-launcher.service
-│   └── xbindkeys/
-│       └── xbindkeysrc        # RShift+RCtrl+F12 recovery combo
+│   ├── xbindkeys/
+│   │   └── xbindkeysrc        # RShift+RCtrl+F12 recovery combo
+│   └── chromium/
+│       └── policies/
+│           └── managed/
+│               └── classpad-policy.json   # URLAllowlist — website navigation containment
 └── scripts/
     ├── install.sh             # First-time machine setup
     ├── plugin-install.sh      # Install/update a plugin from server

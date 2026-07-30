@@ -26,8 +26,13 @@ Build this first — it needs to be running before the launcher so you can verif
 - [ ] Add live clock (centre) — updates every second
 - [ ] Add "Call Teacher" button (right side) — placeholder for now
 - [ ] Add current activity label (between Home and clock) — reads from a shared state file `/tmp/classpad_activity`
+- [ ] Add volume control (bar is the only place a teacher/child can reach it — not optional)
+- [ ] Add debounce/rate-limit to "Call Teacher" (disable briefly after press)
 - [ ] Test: open TuxPaint or any maximised window — bar must remain visible above it
 - [ ] Test: use `xprop` on the bar window to verify strut and state hints are set correctly
+- [ ] **GATE — do not proceed to Phase 3 until this passes:** `sudo apt install gcompris tuxmath` and launch each fullscreen (not just maximised). Check `xprop -id $(xdotool getactivewindow) _NET_WM_STATE` for `_NET_WM_STATE_FULLSCREEN` and confirm the bar is still visible/above. This is the load-bearing assumption behind the whole persistent-bar design — see CLAUDE.md "Open Risks."
+- [ ] **GATE:** install `xbindkeys` now (ahead of Phase 6) and bind `RShift+RCtrl+F12` to a placeholder (`touch /tmp/classpad_hotkey_test`). With gcompris/tuxmath fullscreen and focused, confirm the binding still fires — a fullscreen app's keyboard grab can swallow it before it reaches xbindkeys.
+- [ ] If either gate fails: do not redesign the bar — instead add Openbox `<application>` rules in `rc.xml` forcing `maximized=yes` and denying fullscreen for known plugin process names, then re-test.
 - [ ] Make bar auto-start via Openbox `autostart` file
 
 ---
@@ -42,6 +47,8 @@ Build this first — it needs to be running before the launcher so you can verif
 - [ ] Create example manifests for: tuxpaint, tuxtype, tuxmath, a placeholder website button
 - [ ] Write unit tests for plugin_manager — valid manifest, missing fields, malformed JSON
 - [ ] Create `scripts/plugin-install.sh` — accepts a plugin zip path, extracts to `/opt/classpad/plugins/<id>/`, runs `install.sh` if present
+- [ ] Harden `plugin-install.sh` against path traversal — reject any archive entry containing `..` or an absolute path *before* extraction, regardless of whether extraction uses `unzip` or `zipfile`. Write a test case with a malicious zip (entry like `../../etc/cron.d/x`) and confirm it's rejected.
+- [ ] Confirm no upload path exists for plugin zips outside the admin portal (Phase 8) — plugin-install.sh should only ever be invoked with a path the server already vetted
 
 ---
 
@@ -64,8 +71,10 @@ Build this first — it needs to be running before the launcher so you can verif
   - `launch(plugin)` — spawns the correct subprocess based on plugin type
   - `wait_for_exit()` — monitors the process and signals when it exits
   - `kill_all()` — kills all tracked child processes by name (for recovery)
+- [ ] `launch()` must invoke `launch_command` as an argv list with `shell=False` — never build a shell string. It comes from a server-controlled manifest; treat it as untrusted input.
 - [ ] For `type: app` — launch binary from `launch_command` in manifest
 - [ ] For `type: website` — launch Chromium with correct flags (see CLAUDE.md — use `--app`, NOT `--kiosk`)
+- [ ] Create `system/chromium/policies/managed/classpad-policy.json` setting `URLAllowlist` for curated site domains, and install it to `/etc/chromium/policies/managed/` — `--app --incognito` alone does not stop in-page navigation off a curated site
 - [ ] When a child process exits, update `/tmp/classpad_activity` to empty and return launcher to home screen
 - [ ] Write current activity name to `/tmp/classpad_activity` on launch (bar reads this)
 - [ ] Test full cycle: click button -> app launches -> app closes -> launcher returns
@@ -81,6 +90,7 @@ Build this first — it needs to be running before the launcher so you can verif
 - [ ] Add xbindkeys to Openbox autostart (alongside bar)
 - [ ] Connect bar Home button to `recovery.sh`
 - [ ] Test recovery: launch TuxPaint, hit key combo, verify TuxPaint dies and launcher returns
+- [ ] Test recovery under the Phase 2 worst case too: launch gcompris/tuxmath fullscreen, hit key combo, verify it still fires with the real `recovery.sh` wired up (not just the Phase 2 placeholder binding)
 - [ ] Test systemd restart: kill launcher process manually, verify it restarts within 2 seconds
 
 ---
@@ -188,3 +198,16 @@ Build this first — it needs to be running before the launcher so you can verif
 - [ ] Test imaging one machine from scratch using Clonezilla or `dd`
 - [ ] Verify: new machine boots, sets its own hostname from serial number, connects to WiFi, registers with server, downloads assigned plugins
 - [ ] Document the teacher onboarding process (add machine to server, assign plugins)
+
+---
+
+## Deferred / Needs Scope Decision (not yet assigned a phase)
+
+These are named in `CLAUDE.md` or `pre-build-decisions.md` but have no build phase above. Don't start building them until scoped as v1 or explicitly deferred to v2.
+
+- [ ] `emotion-checkin` custom app — listed in CLAUDE.md's directory structure but has no phase here
+- [ ] GCompris activity whitelist, Pysycache, KTuberling, Blinken, Childsplay — evaluate vs. tuxpaint/tuxtype/tuxmath, confirm v1 inclusion with teaching staff
+- [ ] Mouse dexterity mini-games (if not already covered by the above)
+- [ ] Which teacher receives "Send to Teacher" emails — per-machine config, selectable on screen, or fixed? Not addressed by Phase 12 as written (only the *child's* name is picked)
+- [ ] Word processor email format — plain text, PDF, or screenshot
+- [ ] Retention policy for child-generated content (TuxPaint artwork, word processor text, emails) — wipe on reboot, sync to server, or keep indefinitely? Needs a privacy/safeguarding decision before Phase 12 ships, since it handles a child's name and free text

@@ -1,32 +1,34 @@
 # Pre-Build Decision Checklist
 ### Kids' Linux Launcher Project
 
+> Reconciled against `CLAUDE.md` / `TODO.md` on 2026-07-30 — nothing built yet (clean slate). Checked items are decided and documented elsewhere; unchecked items are still genuinely open. Items marked **FLAG** are gaps this pass surfaced that weren't visible before CLAUDE.md/TODO.md existed.
+
 ---
 
 ## 1. Base OS & Environment
 
-- [ ] Linux distro choice — Lubuntu vs Debian minimal + Openbox vs other
-- [ ] Window manager — Openbox (recommended) vs LXQt vs other
-- [ ] Python version (3.10+ recommended)
-- [ ] Auto-login display manager — LightDM confirmed?
-- [ ] Single OS image for all machines, or per-machine variants?
-- [ ] Imaging/cloning strategy for deploying to multiple machines (Clonezilla, custom ISO, Ansible?)
+- [x] Linux distro — Debian 13 (Trixie) minimal + Openbox (CLAUDE.md)
+- [x] Window manager — Openbox (CLAUDE.md)
+- [x] Python version — 3.11+ (CLAUDE.md)
+- [x] Auto-login display manager — LightDM confirmed (CLAUDE.md, TODO Phase 11)
+- [ ] Single OS image for all machines, or per-machine variants? — still open
+- [ ] Imaging/cloning strategy — TODO Phase 16 mentions Clonezilla/`dd` but the choice isn't finalised
 
 ---
 
 ## 2. Pygame Launcher
 
-- [ ] Target screen resolution and how to handle machines that differ
-- [ ] Button grid layout — how many buttons max on one screen?
-- [ ] Button size, icon size, font size standards
-- [ ] Audio feedback on button press — yes or no?
-- [ ] Transition effect when launching an app (fade, instant?)
-- [ ] Config format finalised — JSON structure decided? (see Server section)
-- [ ] Local fallback config if server is unreachable
-- [ ] Config poll interval (e.g. every 30 seconds, on boot only?)
-- [ ] Where are icons and assets stored on the machine?
-- [ ] How does the launcher detect a child app has exited and return fullscreen?
-- [ ] How are website buttons visually distinguished from app buttons in the launcher UI?
+- [ ] Target screen resolution and how to handle machines that differ — not addressed
+- [x] Button grid layout — up to ~12 buttons (TODO Phase 4)
+- [ ] Button size / icon size / font size standards — only "minimum 96px icons" specified (TODO Phase 4); no font size floor
+- [x] Audio feedback on button press — yes (TODO Phase 4)
+- [ ] Transition effect when launching an app — not specified
+- [x] Config format — JSON via manifest.json + `/config/<machine_id>` response
+- [x] Local fallback config if server unreachable — confirmed, `config_cache.json` (TODO Phase 9)
+- [x] Config poll interval — 30s (TODO Phase 9)
+- [ ] Where are icons/assets stored — implied `/opt/classpad/plugins/<id>/icon.png` via the plugin bundle, but never stated outside the manifest schema
+- [x] How the launcher detects a child app has exited — `process_manager.wait_for_exit()` (TODO Phase 5)
+- [ ] **FLAG** — How are website buttons visually distinguished from app buttons in the launcher UI? Not addressed anywhere.
 
 ---
 
@@ -34,164 +36,154 @@
 
 ### Browser
 
-- [ ] Browser confirmed — Chromium recommended (best flag support for kiosk lockdown)
-- [ ] Chromium launch flags agreed — suggested baseline:
-  - `--kiosk` (hides all browser UI)
-  - `--no-first-run`
-  - `--disable-session-crashed-bubble` (suppresses crash recovery dialog)
-  - `--disable-features=TranslateUI`
-  - `--overscroll-history-navigation=0` (disables back swipe gesture)
-  - `--disable-pinch` (no zoom)
-  - `--incognito` or fresh `--user-data-dir` per launch (clean session every time)
-- [ ] Per-website Chromium flags, or one global set for all website buttons?
-- [ ] Default zoom level — consider increasing for young children (e.g. `--force-device-scale-factor=1.25`)
+- [x] Browser confirmed — Chromium
+- [x] Chromium launch flags agreed — **superseded from this checklist's original baseline**: CLAUDE.md decided `--app` (not `--kiosk`) plus the persistent bar, specifically because `--kiosk` overrides EWMH struts and hides the bar. Flags: `--app=URL --start-maximized --no-first-run --disable-session-crashed-bubble --disable-features=TranslateUI --overscroll-history-navigation=0 --disable-pinch --incognito`.
+- [x] Per-website vs. global flags — per-website, via `chromium_flags` in the manifest (CLAUDE.md example)
+- [ ] Default zoom level — `--force-device-scale-factor=1.25` shown only as an example in CLAUDE.md, not mandated; decide per-machine or global default
 
 ### Return to Home — the key design decision
 
-The core problem: for external websites you do not control, you cannot inject a "Home" button into the page itself.
-
-**Recommended approach: always-on-top overlay window**
-Spawn a small separate window (PyGTK or PyQt5) at the same time as Chromium, set to always-on-top, positioned in a consistent corner (top-right recommended — less likely to be obscured). It shows a large, clearly labelled HOME button. Clicking it kills the Chromium process and closes itself, returning the Pygame launcher to fullscreen. This works for any website regardless of origin.
-
-- [ ] Always-on-top overlay confirmed as approach?
-- [ ] Overlay button position agreed — top-right corner recommended
-- [ ] Overlay button size and label (icon only, text only, or both?)
-- [ ] Overlay toolkit — PyGTK or PyQt5? (PyGTK is lighter; PyQt5 is easier if already a dependency)
-- [ ] Should the overlay also show which site is open, or button only?
+- [x] **Superseded** — this checklist originally recommended a separate always-on-top overlay window per website. CLAUDE.md replaced that with the single persistent bar's Home button (kills all child processes, one mechanism for every app type, not one overlay per site). Confirm this supersession was deliberate if anyone revisits this file.
+- [x] Overlay button position / size / toolkit questions below — **moot**, no per-site overlay is being built
+  - ~~Overlay button position agreed~~
+  - ~~Overlay button size and label~~
+  - ~~Overlay toolkit — PyGTK or PyQt5~~
+  - ~~Should the overlay also show which site is open~~
+- [ ] **PENDING VERIFICATION (TODO Phase 2 gate)** — the bar-Home approach assumes struts keep the bar visible/clickable over any child window, including genuinely fullscreen ones. Untested. See CLAUDE.md "Open Risks."
 
 ### Navigation & Content Control
 
-- [ ] Navigation scope — can children click links within the site and navigate away from the starting URL?
-  - `--kiosk` alone does not prevent in-page navigation
-  - Consider a whitelist-only DNS filter or proxy as a safety net
-  - Or accept that curated sites are trusted and in-page navigation is fine
-- [ ] New tab and popup handling — block popups (`--disable-popup-blocking` off by default in kiosk, but verify)
-- [ ] Download handling — block all downloads (recommended for this age group)
-- [ ] HTTPS only — enforce or warn? (recommended: enforce, refuse to open HTTP URLs)
-- [ ] What to show if a whitelisted site fails to load or is slow? (Chromium's default error page, or custom?)
-- [ ] Content safety net — DNS-level filter (e.g. CleanBrowsing, NextDNS family preset) as a backstop if a site changes its content?
+- [x] Navigation scope decision made — **FLAG, this was the biggest gap found in review**: `--app --incognito` does not stop in-page navigation off a curated site, and this checklist item was left open in the original doc with "or accept curated sites are trusted" as a fallback option. CLAUDE.md now commits to a Chromium managed policy (`URLAllowlist` in `/etc/chromium/policies/managed/classpad-policy.json`) — see TODO Phase 5. Not yet built.
+- [ ] New tab / popup handling — not addressed; verify Chromium's default popup blocking behaviour in `--app` mode
+- [ ] Download handling — not addressed; recommend blocking all downloads for this age group
+- [ ] HTTPS only — not addressed; recommend enforcing, refuse to open HTTP URLs
+- [ ] What to show if a whitelisted site fails to load or is slow — not addressed
+- [ ] DNS-level filter as a backstop (CleanBrowsing, NextDNS) — not addressed; Zscaler is the only content filter currently in the stack and it doesn't cover in-page navigation on an allowlisted site
 
 ### Session & Config
 
-- [ ] Cookie/session data — wipe on every Chromium launch (recommended) or persist across sessions?
-- [ ] Website URLs defined in the same config JSON as app buttons, with a `type: "website"` field?
-- [ ] Who can add or edit website URLs — admin only, or teachers via a restricted portal role?
-- [ ] Should individual website buttons be lockable to specific machines or groups? (e.g. a phonics site only on certain machines)
+- [x] Cookie/session data wiped every launch — `--incognito` confirms this
+- [x] Website URLs in the same config JSON as app buttons, `type: "website"` — confirmed (CLAUDE.md manifest schema)
+- [x] Who can add/edit website URLs — admin only via the admin portal (TODO Phase 8, single admin account)
+- [x] Website buttons lockable to specific machines/groups — confirmed via per-machine plugin assignment (TODO Phase 8 "Assignment UI")
 
 ---
 
 ## 5. App Selection
 
 ### Confirmed apps
-- [ ] TuxPaint
-- [ ] TuxType
-- [ ] TuxMath — include in v1 or later?
+- [x] TuxPaint — v1 (TODO Phase 3 example manifests)
+- [x] TuxType — v1
+- [x] TuxMath — v1
 
-### Existing Linux apps to evaluate
-- [ ] GCompris — full suite launched from its own menu, or launch specific activities directly from the launcher?
-- [ ] Pysycache — include for mouse training?
-- [ ] KTuberling — include for creative play?
-- [ ] Blinken (Simon Says memory) — include?
-- [ ] Childsplay — evaluate vs GCompris, or both?
+### Existing Linux apps to evaluate — **still fully open, needs teacher input**
+- [ ] GCompris — full suite or specific activities? Not decided; TODO doesn't build a GCompris manifest, only lists it in the recovery kill list
+- [ ] Pysycache — not decided
+- [ ] KTuberling — not decided
+- [ ] Blinken — not decided
+- [ ] Childsplay — not decided
 
-### Custom apps to build — confirm which are v1 vs later
-- [ ] Simple word processor with "Send to Teacher" email button
-- [ ] Card matching / memory game (with swappable card sets via server)
-- [ ] On-screen xylophone / piano
-- [ ] Picture-book / storybook viewer (content managed via server)
-- [ ] Emotion check-in picker ("how are you feeling today?")
-- [ ] Mouse dexterity mini-games (if not covered by Pysycache/GCompris)
+### Custom apps to build — v1 vs. later
+- [x] Word processor with "Send to Teacher" — v1 (TODO Phase 12)
+- [x] Memory card game — v1 (TODO Phase 13)
+- [x] Xylophone — v1 (TODO Phase 14)
+- [x] Storybook viewer — v1 (TODO Phase 15)
+- [ ] Emotion check-in picker — **FLAG**: named in CLAUDE.md's directory structure but has no TODO phase. Confirm v1 or defer to v2.
+- [ ] Mouse dexterity mini-games — not decided, may be covered by Pysycache/GCompris above
 
-### Per-app config decisions
-- [ ] TuxPaint — which tools, stamps, and brushes to enable/disable?
-- [ ] TuxType — appropriate word sets and difficulty for 5-6 year olds confirmed?
-- [ ] TuxMath — difficulty ceiling for this age group?
-- [ ] GCompris — activities whitelist agreed with teaching staff?
+### Per-app config decisions — still open
+- [ ] TuxPaint tools/stamps/brushes to enable
+- [ ] TuxType word sets and difficulty for 5-6 year olds
+- [ ] TuxMath difficulty ceiling
+- [ ] GCompris activities whitelist (blocked on the "evaluate" decision above)
 
 ---
 
 ## 6. Central Server
 
-- [ ] Hosting location — local network (Raspberry Pi / old PC) or cloud VPS?
-- [ ] What happens to the children's experience if the server goes offline?
-- [ ] Server OS and tech stack for admin portal (Python Flask/Django, Node.js, other?)
-- [ ] Database — SQLite sufficient, or PostgreSQL?
-- [ ] Admin portal authentication — how many admin accounts, any roles (teacher vs admin)?
-- [ ] Does the server serve web-based activities, or config/email only?
-- [ ] SMTP relay for "Send to Teacher" — handled by central server?
-- [ ] Which email provider / SMTP credentials?
-- [ ] Config JSON structure agreed before building client and server (machines, groups, buttons, apps)
+- [x] Hosting location — local network, Docker (CLAUDE.md)
+- [ ] What happens to the children's experience if the server goes offline long-term — local cache covers short outages (TODO Phase 9) but no stated behaviour for extended downtime (e.g. plugin updates, telemetry backlog)
+- [x] Server stack — Python Flask (CLAUDE.md)
+- [x] Database — SQLite (CLAUDE.md)
+- [x] Admin portal auth — single account, credentials in env var (TODO Phase 8). **No teacher/admin role split** — that's a deliberate scope cut, not an oversight, but worth confirming with whoever expected teacher self-service.
+- [x] Server serves both config/plugins and web-based activity content (storybook JSON) — confirmed
+- [x] SMTP relay handled by central server — confirmed (word processor → server → SMTP)
+- [x] Email provider/credentials — school's own unauthenticated relay inside WAN, not a third-party provider (CLAUDE.md)
+- [x] Config JSON structure — active plugins, layout order, pending commands like `force_home` (TODO Phase 7)
 
 ---
 
 ## 7. Machine Identity & Network
 
-- [ ] Static IP or DHCP for client machines? (Static simplifies admin)
-- [ ] Hostname naming scheme (e.g. classroom-01, classroom-02)
-- [ ] Individual machine configs or group/class configs?
-- [ ] Are machines on a wired or wireless network?
-- [ ] Children's internet access — blocked entirely, or filtered?
-- [ ] What logging or telemetry goes back to the server? (last-seen, errors, usage?)
-- [ ] Firewall rules — what can client machines reach?
+- [x] Static IP or DHCP — DHCP, WPA2-Enterprise PEAP/TTLS (CLAUDE.md)
+- [x] Hostname naming scheme — `11e-<serialnumber>` from `dmidecode -s system-serial-number` (CLAUDE.md)
+- [ ] **FLAG** — `dmidecode -s system-serial-number` needs root and can return blank/`None` on some hardware. TODO Phase 11 runs this once during `install.sh` (root context, fine) — but write the result to a machine_id file at that point rather than re-deriving it live on every boot, in case a later boot runs the check without root.
+- [x] Individual vs. group configs — both supported, admin portal assigns "to a machine or group" (TODO Phase 8)
+- [x] Wired or wireless — wireless, PEAP/TTLS (CLAUDE.md)
+- [ ] Children's internet access — Zscaler filters, but see Navigation & Content Control above; allowlisted-site containment is the real open half of this question
+- [x] Telemetry — last_seen, current_activity, errors via `POST /telemetry/<machine_id>` (TODO Phase 9)
+- [ ] Firewall rules — what can client machines reach — not addressed anywhere
 
 ---
 
 ## 8. User & Session Model
 
-- [ ] Confirmed: no login, single shared OS user per machine (auto-login)
-- [ ] TuxPaint artwork — save locally per session, sync to server, or wipe on reboot?
-- [ ] Word processor — how does the child identify themselves? (name picker on that screen, or not required?)
-- [ ] Any session data retained between reboots? If so, what and where?
+- [x] No login, single shared OS user, auto-login — confirmed
+- [ ] **FLAG** — TuxPaint artwork: save locally, sync to server, or wipe on reboot? Not addressed in CLAUDE.md or TODO — a real gap once children start producing content in Phase 3+ testing
+- [x] Word processor child identification — name picker on open, names configured per-machine in admin portal (TODO Phase 12)
+- [ ] Session data retained between reboots — `config_cache.json` persists by design; artwork/email retention is the open half (see above)
 
 ---
 
 ## 9. Word Processor & Email
 
-- [ ] Format teacher receives — plain text, PDF, or screenshot?
-- [ ] Which teacher receives emails — per-machine config, selectable on screen, or fixed per classroom?
-- [ ] Child's name on email — entered by child, picked from a list, or taken from machine identity?
-- [ ] Does the teacher reply? (if yes, needs more thought — probably out of scope for v1)
-- [ ] Email content retention — stored on server, or send-and-forget?
+- [ ] Format teacher receives — plain text, PDF, or screenshot? Not specified (TODO Phase 12 just says "POSTs content")
+- [ ] **FLAG** — Which teacher receives the email? TODO Phase 12 only picks the *child's* name from a list; nothing selects or configures the receiving teacher address. This needs an explicit decision (fixed per-machine config in admin portal is the natural fit, but it isn't built).
+- [x] Child's name on email — picked from a per-machine list (TODO Phase 12)
+- [x] Does the teacher reply — out of scope for v1 (consistent with this checklist's own suggestion; no reply flow anywhere in TODO)
+- [ ] Email content retention — stored on server or send-and-forget? Not addressed — same gap as artwork retention above
 
 ---
 
 ## 10. Staff Recovery & Resilience
 
-- [ ] Staff key combo agreed — e.g. RShift + RCtrl + F12
-- [ ] Key combo communicated how? (laminated card, sticker on machine?)
-- [ ] Launcher runs as systemd service with Restart=always — confirmed approach?
-- [ ] xbindkeys (or equivalent) as OS-level listener — confirmed approach?
-- [ ] Remote reset from admin portal — in v1, or later?
-- [ ] Process kill list agreed — which app process names does the recovery kill? (must include: chromium, tuxpaint, tuxtype, tuxmath, and the overlay window process)
+- [x] Staff key combo agreed — `RShift + RCtrl + F12` (CLAUDE.md)
+- [ ] Key combo communicated how (laminated card, sticker) — non-technical, still open
+- [x] Launcher runs as systemd service, `Restart=always` — confirmed (TODO Phase 6)
+- [x] xbindkeys as OS-level listener — confirmed, **but pending the TODO Phase 2 gate**: an app holding an active keyboard grab can swallow the combo before xbindkeys sees it. Not yet verified on real fullscreen apps.
+- [x] Remote reset from admin portal — v1, confirmed ("Return to Home" / `force_home`, TODO Phase 8-9)
+- [x] Process kill list agreed — `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris` (CLAUDE.md). Note: the list can't cover arbitrary future plugin processes automatically — CLAUDE.md now requires each plugin that spawns a long-running process to declare its process name explicitly.
 
 ---
 
 ## 11. Accessibility
 
-- [ ] Colour scheme and minimum contrast ratios
-- [ ] Minimum font/icon sizes across all custom apps
-- [ ] Audio cues on all interactions — yes for everything, or selective?
-- [ ] Text-to-speech for storybook viewer (espeak / festival)?
-- [ ] Trackpad sensitivity defaults — adjusted in OS for small hands?
-- [ ] Any children with specific accessibility needs to design for?
+- [ ] Colour scheme and minimum contrast ratios — not addressed
+- [ ] Minimum font/icon sizes across all custom apps — only launcher icon minimum (96px) is specified; nothing for the custom HTML5 apps (Phases 12-15)
+- [ ] Audio cues on all interactions — TODO only specifies this for the launcher (Phase 4) and memory game (Phase 13), not universally
+- [ ] Text-to-speech for storybook viewer — confirmed for that one app (TODO Phase 15, espeak/festival), not a broader decision
+- [ ] Trackpad sensitivity defaults for small hands — not addressed
+- [ ] Specific accessibility needs among the actual children — not addressed; needs input from teaching staff, not something to guess in code
 
 ---
 
 ## 12. Privacy & Safeguarding
 
-- [ ] What data, if any, leaves the local network?
-- [ ] GDPR / school data policy compliance reviewed?
-- [ ] Child-generated content (artwork, typed text) — retention and deletion policy?
-- [ ] Email feature — does it need parental consent consideration?
-- [ ] Who has access to the admin portal and teacher email inbox?
+**Still the least-addressed section, and the one with the most exposure once Phase 12 (email) ships. Worth closing before building Phase 12, not after.**
+
+- [ ] What data, if any, leaves the local network — email via SMTP relay is the one confirmed egress path (stays within school WAN); no other stated egress, but never explicitly confirmed as "nothing else leaves"
+- [ ] GDPR / school data policy compliance reviewed — not addressed
+- [ ] Child-generated content retention/deletion policy — not addressed (same gap flagged in sections 8 and 9)
+- [ ] Email feature parental consent — not addressed
+- [ ] Who has access to the admin portal and teacher email inbox — admin portal is single-account (Section 6), but "who holds that credential" is a people/process question, not addressed
 
 ---
 
 ## 13. Scope & Phasing
 
-- [ ] MVP app list confirmed (what must be in v1 vs what can wait?)
-- [ ] Custom apps to build in v1 vs v2 agreed
-- [ ] Number of machines in initial rollout
-- [ ] Who maintains the server and machines ongoing?
-- [ ] OS and app update strategy (how and how often?)
-- [ ] Source control — repo location and structure agreed before first commit
+- [x] MVP app list — tuxpaint, tuxtype, tuxmath + 5 custom apps (TODO Phases 3, 12-15); gcompris and others remain unevaluated (Section 5)
+- [ ] Custom apps v1 vs. v2 — resolved for 4 of 5 originally-listed custom apps; `emotion-checkin` still unscoped (Section 5, and TODO's new "Deferred" section)
+- [ ] Number of machines in initial rollout — not stated
+- [ ] Who maintains the server and machines ongoing — not stated
+- [ ] OS and app update strategy — not addressed anywhere; worth deciding before Phase 16 imaging, since a fleet of unattended classroom laptops needs a patching story
+- [x] Source control — repo exists, structure matches CLAUDE.md (this commit)
