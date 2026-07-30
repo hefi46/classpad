@@ -1,0 +1,9 @@
+{
+  "id": "tuxtype",
+  "name": "TuxTyping",
+  "version": "1.0.0",
+  "type": "app",
+  "launch_command": "/usr/games/tuxtype --fullscreen",
+  "icon": "icon.png",
+  "description": "Typing practice game"
+}

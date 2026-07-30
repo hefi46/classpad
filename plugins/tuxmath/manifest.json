@@ -1,0 +1,9 @@
+{
+  "id": "tuxmath",
+  "name": "TuxMath",
+  "version": "1.0.0",
+  "type": "app",
+  "launch_command": "/usr/games/tuxmath --fullscreen",
+  "icon": "icon.png",
+  "description": "Arithmetic practice game"
+}

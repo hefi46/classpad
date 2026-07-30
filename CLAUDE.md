@@ -56,7 +56,26 @@ my-plugin/
 }
 ```
 
-**Security:** plugin zips are trusted-admin input, not arbitrary uploads — `install.sh` runs with the same privileges as the install process (expected: root), so anyone who can push a plugin owns every machine. `plugin-install.sh` must reject archive entries containing `..` or absolute paths before extraction (path traversal), regardless of whether extraction uses `unzip` or Python's `zipfile`. Plugin upload is admin-portal-only (see Central Server / Admin Portal below) — there is no public or unauthenticated upload path.
+**Fields (all types):**
+
+| Field | Required | Notes |
+|---|---|---|
+| `id` | yes | Lowercase, matches `^[a-z0-9][a-z0-9-]*$`. Used as the install directory name and in the process kill list. |
+| `name` | yes | Display name shown on the button. |
+| `version` | yes | `major.minor.patch`, e.g. `1.0.0`. |
+| `type` | yes | One of `app`, `website`, `custom`. |
+| `icon` | yes | Path to a 256x256 PNG, relative to the plugin directory. |
+| `description` | yes | Short human-readable description. |
+
+**Type-specific fields:**
+
+| Field | Required for | Notes |
+|---|---|---|
+| `launch_command` | `app`, `custom` | Shell-like string, e.g. `"/usr/bin/tuxpaint --fullscreen=yes"`. Split with `shlex.split()` and passed as an argv list with `shell=False` — no shell is ever invoked, so this is safe to author with normal-looking flags. |
+| `url` | `website` | Target URL. |
+| `chromium_flags` | `website` (optional) | Shell-like string of extra flags appended to the base Chromium flag set, e.g. `"--force-device-scale-factor=1.25"`. Same `shlex.split()` rule as `launch_command`. |
+
+**Security:** plugin zips are trusted-admin input, not arbitrary uploads — `install.sh` runs with the same privileges as the install process (expected: root), so anyone who can push a plugin owns every machine. `plugin-install.sh` must reject archive entries containing `..` or absolute paths before extraction (path traversal), regardless of whether extraction uses `unzip` or Python's `zipfile`. It must also validate the manifest's `id` field against the `^[a-z0-9][a-z0-9-]*$` pattern *before* using it to build any filesystem path (e.g. the install target or an `rm -rf` target) — a malicious or malformed `id` (`../../etc`, empty string, `a/b`) is a second, independent path-traversal vector alongside archive entry names. Plugin upload is admin-portal-only (see Central Server / Admin Portal below) — there is no public or unauthenticated upload path.
 
 For website buttons:
 ```json
@@ -158,6 +177,7 @@ Gated verification steps live in `TODO.md` Phase 2. Two of the three original ri
 classpad/
 ├── CLAUDE.md
 ├── TODO.md
+├── conftest.py                 # Puts repo root on sys.path so `tests/` can `import launcher...`/`import server...`
 ├── launcher/                  # Pygame home screen
 │   ├── main.py
 │   ├── config.py              # Config loading and server polling
@@ -188,6 +208,9 @@ classpad/
 │   │   ├── manifest.json
 │   │   └── icon.png
 │   ├── tuxmath/
+│   ├── website-placeholder/   # Example website-type button — url is a placeholder, not a real curated site
+│   │   ├── manifest.json
+│   │   └── icon.png
 │   ├── gcompris/
 │   ├── wordprocessor/         # Custom app
 │   │   ├── manifest.json
@@ -210,10 +233,13 @@ classpad/
 │       └── policies/
 │           └── managed/
 │               └── classpad-policy.json   # URLAllowlist — website navigation containment
-└── scripts/
-    ├── install.sh             # First-time machine setup
-    ├── plugin-install.sh      # Install/update a plugin from server
-    └── recovery.sh            # Called by xbindkeys to kill child processes
+├── scripts/
+│   ├── install.sh             # First-time machine setup
+│   ├── plugin-install.sh      # Install/update a plugin from server
+│   └── recovery.sh            # Called by xbindkeys to kill child processes
+└── tests/                     # pytest unit tests (run via python3-pytest, apt-installed)
+    ├── test_plugin_manager.py
+    └── test_plugin_install.py
 ```
 
 ---

@@ -4,3 +4,5 @@ python-xlib
 # GObject introspection bindings don't build reliably via pip on this hardware.
 # python-xlib (pure Python, no C build) is used because Gdk.Window.property_change
 # isn't exposed by GObject-Introspection for setting _NET_WM_STRUT_PARTIAL.
+# python3-pytest (dev/test only) is also an apt package — `sudo apt install python3-pytest` —
+# this Debian image is externally-managed and refuses `pip install` outside a venv.

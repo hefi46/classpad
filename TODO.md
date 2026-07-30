@@ -39,17 +39,19 @@ Build this first — it needs to be running before the launcher so you can verif
 
 ## Phase 3: Plugin System (local)
 
-- [ ] Define and document the `manifest.json` schema (see CLAUDE.md) — must be finalised before building anything that reads it
-- [ ] Create `launcher/plugin_manager.py`:
+- [x] Define and document the `manifest.json` schema (see CLAUDE.md) — must be finalised before building anything that reads it. Finalised 2026-07-30: field table (required/optional per type), `id` format `^[a-z0-9][a-z0-9-]*$`, `version` as `major.minor.patch`. `launch_command`/`chromium_flags` stay shell-like strings (matching the existing CLAUDE.md example and pre-build-decisions.md §3), split with `shlex.split()` and passed as argv with `shell=False` — no shell is ever invoked, so no rewrite to a JSON array was needed.
+- [x] Create `launcher/plugin_manager.py`:
   - Scans `/opt/classpad/plugins/` for installed plugin directories
   - Reads and validates each `manifest.json`
   - Returns a list of plugin objects sorted by name
-- [ ] Create example manifests for: tuxpaint, tuxtype, tuxmath, a placeholder website button
+  - Invalid plugins (missing manifest, malformed JSON, missing fields/icon, bad id/version/type) are skipped with a stderr warning rather than crashing the scan
+- [x] Create example manifests for: tuxpaint, tuxtype, tuxmath, a placeholder website button
   - TuxPaint's `launch_command` should use native fullscreen (`--fullscreen=yes`), not the windowed `--windowed --1366x713` variant tested during the Phase 2 gate — decided 2026-07-30, since TuxPaint has its own reachable exit (same reasoning as gcompris-qt/tuxmath in Phase 2), so it doesn't need the bar visible either. The windowed test was a real proof of concept (confirmed to size and stack correctly) but isn't the chosen approach.
-- [ ] Write unit tests for plugin_manager — valid manifest, missing fields, malformed JSON
-- [ ] Create `scripts/plugin-install.sh` — accepts a plugin zip path, extracts to `/opt/classpad/plugins/<id>/`, runs `install.sh` if present
-- [ ] Harden `plugin-install.sh` against path traversal — reject any archive entry containing `..` or an absolute path *before* extraction, regardless of whether extraction uses `unzip` or `zipfile`. Write a test case with a malicious zip (entry like `../../etc/cron.d/x`) and confirm it's rejected.
-- [ ] Confirm no upload path exists for plugin zips outside the admin portal (Phase 8) — plugin-install.sh should only ever be invoked with a path the server already vetted
+  - `plugins/website-placeholder/` created with a placeholder `url` — not a real curated site, `URLAllowlist` decision is still open (see CLAUDE.md Open Risks)
+- [x] Write unit tests for plugin_manager — valid manifest, missing fields, malformed JSON (`tests/test_plugin_manager.py`, 18 cases, run via `python3 -m pytest`; `python3-pytest` installed via apt since this image is externally-managed)
+- [x] Create `scripts/plugin-install.sh` — accepts a plugin zip path, extracts to `/opt/classpad/plugins/<id>/`, runs `install.sh` if present. Plugins dir overridable via `CLASSPAD_PLUGINS_DIR` env var for testing.
+- [x] Harden `plugin-install.sh` against path traversal — reject any archive entry containing `..` or an absolute path *before* extraction (validated in the same Python invocation that extracts, so a rejected zip never touches disk outside the staging dir). Also validates the manifest's `id` field against `^[a-z0-9][a-z0-9-]*$` *before* it's used to build the install/`rm -rf` target path — a malicious `id` (e.g. `../../etc`) is a second, independent traversal vector. `tests/test_plugin_install.py`, 8 cases including a malicious-entry zip (`../../etc/cron.d/x`), an absolute-path entry, and a malicious manifest `id` — all confirmed rejected with nothing created outside the scratch plugins dir.
+- [x] Confirm no upload path exists for plugin zips outside the admin portal (Phase 8) — plugin-install.sh should only ever be invoked with a path the server already vetted. Confirmed: `server/routes/*.py` and `server/app.py` are still empty stubs, no route of any kind exists yet, so there is no upload path anywhere in the current codebase (upload lands in Phase 8).
 
 ---
 
