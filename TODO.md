@@ -105,6 +105,14 @@ Build this first — it needs to be running before the launcher so you can verif
 
 ## Phase 7: Central Server (Flask)
 
+**Handed off to a separate host (2026-07-30):** Phases 7-10 (server +
+client-polling) are developed on a Windows machine via WSL2 + Docker, not on
+the 11e — see CLAUDE.md "Development Environment." Client-side work (Phases
+1-6, done) stays on the 11e. Both sides work against the same GitHub repo
+(`origin`); push/pull is the handoff, so there's no other state to transfer
+between hosts. Deployment target: Ubuntu Server on Hyper-V (x86_64, matches
+WSL2 — no multi-arch build needed).
+
 - [ ] Create `server/app.py` — Flask app factory, register blueprints
 - [ ] Create `server/models.py` — SQLite models: Machine, Plugin, Assignment, Config
 - [ ] Implement `GET /config/<machine_id>` — returns JSON: active plugins for this machine, layout order, any pending commands (e.g. `force_home: true`)

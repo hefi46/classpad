@@ -109,7 +109,8 @@
 
 ## 6. Central Server
 
-- [x] Hosting location — local network, Docker (CLAUDE.md)
+- [x] Hosting location — local network, Docker (CLAUDE.md). Deployment target confirmed 2026-07-30: Ubuntu Server on Hyper-V, on real server hardware (x86_64).
+- [x] Server dev environment — separate host from the 11e client, decided 2026-07-30: Windows machine via WSL2 + Docker, repo kept on the native WSL2 filesystem (not `/mnt/c/...`) for SQLite/filesystem-performance reasons. See CLAUDE.md "Development Environment."
 - [ ] What happens to the children's experience if the server goes offline long-term — local cache covers short outages (TODO Phase 9) but no stated behaviour for extended downtime (e.g. plugin updates, telemetry backlog)
 - [x] Server stack — Python Flask (CLAUDE.md)
 - [x] Database — SQLite (CLAUDE.md)

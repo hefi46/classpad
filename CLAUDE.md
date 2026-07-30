@@ -251,7 +251,17 @@ classpad/
 
 ## Development Environment
 
-- **Dev machine**: Lenovo ThinkPad 11e running Debian 13 + Openbox (matches target hardware)
+Client (launcher/bar, Phases 1-6) and server (Phases 7-10) are developed on
+different hosts — decided 2026-07-30, since the server doesn't need or
+benefit from running on the 11e hardware, and the Windows machine is
+significantly more capable for it. Both work against this same git repo
+(`origin` on GitHub); `git push`/`pull` is the handoff between them, so keep
+CLAUDE.md/TODO.md up to date and pushed before switching machines — a fresh
+Claude Code session on either host reads its project context from these
+files plus `git log`, not from any state carried over from the other host.
+
+**Client dev machine**: Lenovo ThinkPad 11e running Debian 13 + Openbox
+(matches target hardware)
 - **Editor**: VS Code via Remote SSH from Windows if preferred
 - **Required packages** (install with `sudo apt install`):
   ```
@@ -262,12 +272,20 @@ classpad/
   ```
 - **X11 debugging tools**: `xprop` and `xwininfo` (in x11-utils) — use these to verify EWMH struts and window states
 
+**Server dev machine**: Windows, via WSL2 + Docker — decided 2026-07-30. Keep
+the repo checkout on the native WSL2 filesystem (e.g. `~/classpad`), not
+under `/mnt/c/...` — bind mounts from the Windows drive are noticeably
+slower and SQLite (Phase 7) is sensitive to slow/networked filesystem I/O
+for its locking. Target deployment is Ubuntu Server on Hyper-V on real
+server hardware — x86_64, so no multi-arch build concerns; a Docker image
+built in WSL2 (also x86_64) runs unmodified there.
+
 ---
 
 ## Network & Deployment Context
 
 - School network: DHCP, WPA2-Enterprise (PEAP/TTLS), Zscaler content filtering
 - Machine hostnames: `11e-<serialnumber>` (from `dmidecode -s system-serial-number`)
-- Central server: local network, Docker
+- Central server: local network, Docker — deployment target is Ubuntu Server on Hyper-V, on real server hardware (decided 2026-07-30). Developed separately from the 11e client (see Development Environment above).
 - SMTP: unauthenticated relay inside WAN, accepts mail for @education.vic.gov.au and @edumail.vic.gov.au
 - Target deployment: Lenovo ThinkPad 11e 3rd gen (20G9S05P00) and 5th gen (20LRS04R00)
