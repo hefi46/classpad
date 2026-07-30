@@ -269,8 +269,24 @@ files plus `git log`, not from any state carried over from the other host.
   python3 python3-pip python3-pygame
   python3-gi python3-gi-cairo gir1.2-gtk-3.0
   chromium git curl xbindkeys x11-utils xdotool
+  alsa-utils
   ```
+  `alsa-utils` (provides `amixer`, used by the bar's volume slider) was
+  missing from this list until found on real hardware — the ALSA kernel
+  stack was present and correctly loaded, but with no `amixer` binary
+  installed, every volume-slider drag silently failed (`Popen` on a
+  nonexistent binary). Worth checking for on any fresh image; there's no
+  visible symptom of this beyond "the slider doesn't seem to do anything."
 - **X11 debugging tools**: `xprop` and `xwininfo` (in x11-utils) — use these to verify EWMH struts and window states
+- **Audio boots muted on this hardware.** `Master` and `Capture` are muted
+  and at 0% out of the box (confirmed via the `platform::mute`/
+  `platform::micmute` LEDs, which mirror the real ALSA switch state via the
+  kernel's `snd_ctl_led` module — not a separate/stuck indicator). `Speaker`/
+  `Headphone`/`PCM` are already unmuted at 100%, so `Master` is the only
+  gate that matters. `scripts/install.sh` (Phase 11) needs to unmute and set
+  a sane default (`amixer sset Master 70% unmute`, matching the bar's
+  default slider position) as part of first-boot setup, or a freshly imaged
+  machine will be silent with no visible error.
 
 **Server dev machine**: Windows, via WSL2 + Docker — decided 2026-07-30. Keep
 the repo checkout on the native WSL2 filesystem (e.g. `~/classpad`), not

@@ -161,7 +161,7 @@ WSL2 — no multi-arch build needed).
 
 - [ ] Create `system/lightdm/lightdm.conf` — auto-login for the kiosk user, no password
 - [ ] Create `system/openbox/autostart` — starts bar.py, enables xbindkeys, starts classpad-launcher systemd service
-- [ ] Create `scripts/install.sh` — installs all apt dependencies, copies system files to correct locations, enables systemd service, sets hostname from serial number, sets up PEAP/TTLS WiFi config
+- [ ] Create `scripts/install.sh` — installs all apt dependencies (including `alsa-utils` — see CLAUDE.md, found missing from the required-packages list on real hardware), copies system files to correct locations, enables systemd service, sets hostname from serial number, sets up PEAP/TTLS WiFi config, unmutes and sets a default volume (`amixer sset Master 70% unmute`) — audio boots muted at 0% on this hardware with no visible error, found and fixed manually on the dev machine 2026-07-30, see CLAUDE.md "Development Environment"
 - [ ] Test full boot-to-launcher flow: power on -> auto-login -> bar appears -> launcher appears
 - [ ] Test reboot recovery: reboot machine, verify everything comes back correctly
 
