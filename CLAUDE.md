@@ -185,7 +185,9 @@ classpad/
 │   ├── plugin_manager.py      # Reads installed plugins, builds button grid
 │   ├── process_manager.py     # Subprocess launching and monitoring
 │   └── assets/
-│       └── fonts/
+│       ├── fonts/
+│       └── sounds/
+│           └── click.wav      # Button click feedback, generated via stdlib `wave` (no bundled binary asset)
 ├── bar/                       # PyGTK persistent bar
 │   ├── bar.py                 # Main bar window, EWMH struts, buttons
 │   └── assets/
@@ -239,7 +241,8 @@ classpad/
 │   └── recovery.sh            # Called by xbindkeys to kill child processes
 └── tests/                     # pytest unit tests (run via python3-pytest, apt-installed)
     ├── test_plugin_manager.py
-    └── test_plugin_install.py
+    ├── test_plugin_install.py
+    └── test_config.py         # Button grid layout math (no display needed)
 ```
 
 ---

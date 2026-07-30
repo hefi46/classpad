@@ -57,14 +57,14 @@ Build this first — it needs to be running before the launcher so you can verif
 
 ## Phase 4: Pygame Launcher
 
-- [ ] Create `launcher/main.py` — Pygame init, fullscreen window positioned below the bar (y-offset = bar height, height = screen height minus bar height)
-- [ ] Create `launcher/button.py` — Button class: renders icon + label, handles hover and click states, plays a click sound on press
-- [ ] Create `launcher/config.py` — loads plugin list from plugin_manager, builds button grid layout
-- [ ] Render button grid from installed plugins — evenly spaced, large icons (minimum 96px), readable labels
-- [ ] Handle different numbers of plugins gracefully (1 button up to ~12)
-- [ ] Add a background colour/image appropriate for young children
-- [ ] Test: launcher fills the screen below the bar exactly, no overlap
-- [ ] Add audio feedback on button click (short positive sound)
+- [x] Create `launcher/main.py` — Pygame init, fullscreen window positioned below the bar (y-offset = bar height, height = screen height minus bar height). Uses `SDL_VIDEO_WINDOW_POS` + `pygame.NOFRAME` (no built-in EWMH strut concept in pygame/SDL, unlike the GTK bar) to position/size the window; `pygame.init()` (not just `pygame.display.init()`) is required so `pygame.font` works — an earlier version only initialised `display`+`mixer` and would have crashed the moment a real button with a label was rendered, caught via real on-hardware testing before it shipped.
+- [x] Create `launcher/button.py` — Button class: renders icon + label, handles hover and click states, plays a click sound on press. Label font size shrinks to fit the tile width (down to a floor) — found by testing a real 12-plugin grid on hardware: long names like "Website Placeholder" spilled out of their tile and into the neighbour at a fixed font size.
+- [x] Create `launcher/config.py` — builds button grid layout (`main.py` loads the plugin list directly from `plugin_manager.scan_plugins()`; a `config.load_plugins()` pass-through wrapper was written then removed — nothing needed the indirection). `compute_grid_dimensions()` picks cols/rows by maximising resulting tile size for the actual screen aspect ratio rather than a fixed breakpoint table.
+- [x] Render button grid from installed plugins — evenly spaced, large icons (128px, comfortably over the 96px minimum), readable labels (DejaVu Sans Bold — present on the target Debian image, no bundled font file needed)
+- [x] Handle different numbers of plugins gracefully (1 button up to ~12) — verified via `tests/test_config.py` (layout math: no overlap, all tiles in-bounds, all tiles fit the real rendered icon size, for every count 1–12 at the real 1366x713 target resolution) plus a real 12-plugin run on hardware (see label-shrinking fix above, found by this test)
+- [x] Add a background colour/image appropriate for young children — flat soft sky-blue; no image asset needed
+- [x] Test: launcher fills the screen below the bar exactly, no overlap — **verified on real hardware (2026-07-30)**: ran the actual `python3 -m launcher.main` (not a stand-in script) against real plugins installed to `/opt/classpad/plugins`, alongside the real bar. `xwininfo` confirms the launcher window is exactly `1366x713+0+55`, and the screenshot shows real buttons rendered under the real bar with no overlap. Also resolved the open "how are website buttons visually distinguished from app buttons" question from `pre-build-decisions.md` §2 while testing this: they aren't — all button types render identically (see that file).
+- [x] Add audio feedback on button click (short positive sound) — `launcher/assets/sounds/click.wav`, a short two-note chime generated via the stdlib `wave` module (no bundled binary asset, no numpy dependency); verified it plays through `pygame.mixer` on real hardware and fires on real `xdotool` clicks in the button grid
 
 ---
 

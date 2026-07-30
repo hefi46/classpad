@@ -35,7 +35,7 @@
 - [x] Config poll interval — 30s (TODO Phase 9)
 - [ ] Where are icons/assets stored — implied `/opt/classpad/plugins/<id>/icon.png` via the plugin bundle, but never stated outside the manifest schema
 - [x] How the launcher detects a child app has exited — `process_manager.wait_for_exit()` (TODO Phase 5)
-- [ ] **FLAG** — How are website buttons visually distinguished from app buttons in the launcher UI? Not addressed anywhere.
+- [x] **RESOLVED (2026-07-30)** — website buttons are NOT visually distinguished from app/custom buttons. To a 5-6 year old, a curated website and a native app are the same thing: a tile that launches an activity. Render all button types identically (icon + label); don't add a type badge/globe icon or any other marker.
 
 ---
 
