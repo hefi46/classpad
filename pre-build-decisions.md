@@ -16,6 +16,13 @@
 
 ---
 
+## 1b. Audio Stack
+
+- [x] **RESOLVED (2026-07-30, real hardware)** — confirmed plain ALSA, no PulseAudio/PipeWire (`gcompris-qt`'s own log shows `PulseAudioService: pa_context_connect() failed`; nothing pulseaudio/pipewire-related installed). `bar/bar.py` uses `amixer -q sset Master <pct>%`. Still unverified: whether the ALSA control is actually named `Master` on the real 11e (`amixer scontrols`) — the dev machine used for this test may not be identical audio hardware to the classroom units.
+- [ ] **FLAG (found 2026-07-30)** — hardware volume keys (dedicated keys and Fn+F1/Fn+F2) do not generate any input event on this 11e unit at the kernel level, even though `thinkpad_acpi` advertises `KEY_VOLUMEUP`/`KEY_VOLUMEDOWN` as capabilities (checked via `evtest` on both the ThinkPad hotkey device and the main keyboard device directly, bypassing X). This means volume is **only** adjustable via the bar's on-screen slider, which in turn is unreachable during genuinely fullscreen apps (GCompris-qt, TuxMath) — see CLAUDE.md "Persistent Bar." Not investigated further (firmware-level issue, not something fixable in this stack); worth a quick check on a second physical unit before assuming it's true fleet-wide.
+
+---
+
 ## 2. Pygame Launcher
 
 - [ ] Target screen resolution and how to handle machines that differ — not addressed
@@ -49,11 +56,12 @@
   - ~~Overlay button size and label~~
   - ~~Overlay toolkit — PyGTK or PyQt5~~
   - ~~Should the overlay also show which site is open~~
-- [ ] **PENDING VERIFICATION (TODO Phase 2 gate)** — the bar-Home approach assumes struts keep the bar visible/clickable over any child window, including genuinely fullscreen ones. Untested. See CLAUDE.md "Open Risks."
+- [x] **VERIFIED (2026-07-30, real hardware) — struts do NOT survive genuine fullscreen.** GCompris-qt/TuxMath cover the bar entirely when fullscreen. Accepted as a limitation rather than fixed — see CLAUDE.md "Persistent Bar" and "Recovery model." The bar-Home button still works for the home screen and non-fullscreen apps; the recovery hotkey covers the fullscreen case (next section).
 
 ### Navigation & Content Control
 
-- [x] Navigation scope decision made — **FLAG, this was the biggest gap found in review**: `--app --incognito` does not stop in-page navigation off a curated site, and this checklist item was left open in the original doc with "or accept curated sites are trusted" as a fallback option. CLAUDE.md now commits to a Chromium managed policy (`URLAllowlist` in `/etc/chromium/policies/managed/classpad-policy.json`) — see TODO Phase 5. Not yet built.
+- [x] **F11 fullscreen-escape — RESOLVED (2026-07-30, real hardware).** A separate, worse issue than in-page navigation: F11 inside `--app` mode escaped to real fullscreen and hid the bar (visually subtle, since `--app` already hides the address bar). Fixed and verified with `FullscreenAllowed: false` in `system/chromium/policies/managed/classpad-policy.json` — F11 is now confirmed a no-op, bar stays visible.
+- [ ] In-page navigation off a curated site — **still open**, this is the original gap flagged in this checklist ("or accept curated sites are trusted" was the only fallback offered). The managed policy file exists and works (see above) but has no `URLAllowlist` yet — needs the actual curated site list before it can be added. Don't add a guessed domain list; see CLAUDE.md Open Risks.
 - [ ] New tab / popup handling — not addressed; verify Chromium's default popup blocking behaviour in `--app` mode
 - [ ] Download handling — not addressed; recommend blocking all downloads for this age group
 - [ ] HTTPS only — not addressed; recommend enforcing, refuse to open HTTP URLs
@@ -77,7 +85,7 @@
 - [x] TuxMath — v1
 
 ### Existing Linux apps to evaluate — **still fully open, needs teacher input**
-- [ ] GCompris — full suite or specific activities? Not decided; TODO doesn't build a GCompris manifest, only lists it in the recovery kill list
+- [ ] GCompris-qt — full suite or specific activities? Still not decided; TODO doesn't build a manifest for it yet. It has been smoke-tested on real hardware (launches fullscreen, exits cleanly via Escape or its own close affordance, no PulseAudio dependency issue) purely as part of the Phase 2 fullscreen gate — that's not the same as an activity-content review with teaching staff.
 - [ ] Pysycache — not decided
 - [ ] KTuberling — not decided
 - [ ] Blinken — not decided
@@ -150,9 +158,10 @@
 - [x] Staff key combo agreed — `RShift + RCtrl + F12` (CLAUDE.md)
 - [ ] Key combo communicated how (laminated card, sticker) — non-technical, still open
 - [x] Launcher runs as systemd service, `Restart=always` — confirmed (TODO Phase 6)
-- [x] xbindkeys as OS-level listener — confirmed, **but pending the TODO Phase 2 gate**: an app holding an active keyboard grab can swallow the combo before xbindkeys sees it. Not yet verified on real fullscreen apps.
+- [x] xbindkeys as OS-level listener — confirmed, and **verified 2026-07-30 on real hardware**: `RShift+RCtrl+F12` (tested as `Ctrl+Shift+F12`) fires correctly through both GCompris-qt and TuxMath while genuinely fullscreen and focused, via synthetic (`xdotool`) and real physical keypresses. Neither app blocks it with an active keyboard grab. This is now the confirmed safety net for the fullscreen-bar limitation above.
 - [x] Remote reset from admin portal — v1, confirmed ("Return to Home" / `force_home`, TODO Phase 8-9)
-- [x] Process kill list agreed — `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris` (CLAUDE.md). Note: the list can't cover arbitrary future plugin processes automatically — CLAUDE.md now requires each plugin that spawns a long-running process to declare its process name explicitly.
+- [x] Process kill list agreed — `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris-qt` (CLAUDE.md, corrected from `gcompris` — Debian trixie only packages the Qt rewrite). Note: the list can't cover arbitrary future plugin processes automatically — CLAUDE.md now requires each plugin that spawns a long-running process to declare its process name explicitly.
+- [x] **"Call Teacher" removed from scope entirely (2026-07-30)** — no hardware hotkey substitute either; the teacher is physically present in the classroom.
 
 ---
 
@@ -181,7 +190,7 @@
 
 ## 13. Scope & Phasing
 
-- [x] MVP app list — tuxpaint, tuxtype, tuxmath + 5 custom apps (TODO Phases 3, 12-15); gcompris and others remain unevaluated (Section 5)
+- [x] MVP app list — tuxpaint, tuxtype, tuxmath + 5 custom apps (TODO Phases 3, 12-15); gcompris-qt and others remain unevaluated for activity whitelist (Section 5), though it's now installed and confirmed to run/exit cleanly on real hardware
 - [ ] Custom apps v1 vs. v2 — resolved for 4 of 5 originally-listed custom apps; `emotion-checkin` still unscoped (Section 5, and TODO's new "Deferred" section)
 - [ ] Number of machines in initial rollout — not stated
 - [ ] Who maintains the server and machines ongoing — not stated

@@ -12,17 +12,17 @@ A central server (Docker, local network) manages app configuration and deploymen
 
 ## Architecture
 
-### Persistent Bar (always visible)
+### Persistent Bar
 - Built with **PyGTK** (python3-gi / GObject Introspection)
 - Runs as a separate process, started before the launcher
-- Uses EWMH strut hints (`_NET_WM_STRUT_PARTIAL`) to reserve screen space at the top
-- Set `_NET_WM_STATE_ABOVE` (always-on-top)
-- Height: ~55px at top of screen
-- Contains: Home button, clock, volume control, "Call Teacher" button, current activity label
-- Volume control is not optional — classroom audio complaints are the most common real-world support request for this kind of deployment
-- "Call Teacher" must debounce/rate-limit (e.g. disable for N seconds after press) — a child will press it repeatedly otherwise
+- Uses EWMH strut hints (`_NET_WM_STRUT_PARTIAL`) to reserve screen space at the top, and `_NET_WM_STATE_ABOVE` to stay on top
+- Height: 55px at top of screen
+- Contains: Home button, current activity label, volume control, clock
+- Volume control is not optional — classroom audio complaints are the most common real-world support request for this kind of deployment. No "Call Teacher" button — cut from scope; the teacher is physically present in the classroom.
 - Clicking Home kills all child processes and signals the launcher to return to the home screen
 - All other apps (Pygame launcher, Chromium, TuxPaint etc.) run in the remaining screen area below the bar
+- **Verified on real 11e hardware (2026-07-30):** struts/above-state reliably keep the bar visible over the launcher and any non-fullscreen window (`_NET_WORKAREA` correctly reserves the top 55px). They do **not** survive a genuinely fullscreen child — GCompris-qt and TuxMath both set `_NET_WM_STATE_FULLSCREEN` and Openbox stacks them above the bar, covering it entirely. This is a known, accepted limitation, not a bug to fix: see "Recovery model" below for why it's still safe.
+- Hardware volume keys were investigated as a bar-independent volume path (relevant since volume is unreachable while the bar is covered) but don't currently generate any input event on this hardware at the kernel level, despite `thinkpad_acpi` advertising `KEY_VOLUMEUP`/`KEY_VOLUMEDOWN` as capabilities. Not pursued further — the on-screen slider is the only volume control, and it's unavailable during fullscreen apps.
 
 ### Pygame Launcher (home screen)
 - **Pygame** fullscreen window occupying the non-bar area
@@ -76,8 +76,10 @@ For website buttons:
 - The launcher tracks the process and detects when it exits
 - For `type: website`: launches Chromium with `--app=URL --start-maximized --no-first-run --disable-session-crashed-bubble --disable-features=TranslateUI --overscroll-history-navigation=0 --disable-pinch --incognito`
 - Do NOT use `--kiosk` for websites — it overrides EWMH struts and covers the bar
-- Website navigation containment: `--app` mode does not stop a child following an in-page link off the curated site. Deploy a Chromium managed policy (`system/chromium/policies/managed/classpad-policy.json`) setting `URLAllowlist` — do not rely on `--app` mode or Zscaler alone to contain navigation.
-- For `type: app`: launches the binary directly
+- **Verified on real hardware (2026-07-30):** `--app --start-maximized` (no `--kiosk`) correctly respects the strut — Chromium comes up `MAXIMIZED_VERT`/`MAXIMIZED_HORZ`, filling exactly the area below the bar, with the bar stacked on top. Chromium is the one app type that genuinely needs the bar: unlike TuxPaint/GCompris/TuxMath, a curated website has no built-in "back to menu" affordance, so Home has to come from the bar, not the page.
+- **F11 fullscreen-escape — found and fixed.** A child pressing F11 inside `--app` mode does escape to real `_NET_WM_STATE_FULLSCREEN` (confirmed on real hardware) and hides the bar — visually subtle since `--app` already hides the address bar/tabs, so nothing else looks different. Fixed with the Chromium managed policy `FullscreenAllowed: false` in `system/chromium/policies/managed/classpad-policy.json` — verified on real hardware that F11 then does nothing (state stays `MAXIMIZED_VERT`/`MAXIMIZED_HORZ`, bar stays visible).
+- Website navigation containment (in-page links off the curated site) is still open — the same managed-policy file needs a `URLAllowlist` once the curated site list is decided (see `pre-build-decisions.md` §3). Don't invent a placeholder domain list; a wrong allowlist is worse than none because it looks done.
+- For `type: app`: launches the binary directly. Apps with their own reachable exit affordance (TuxPaint, GCompris-qt, TuxMath all confirmed to have one — Escape and/or an on-screen close control) may run in native fullscreen mode; the recovery hotkey and the app's own exit cover getting back to the launcher, and the bar is allowed to be covered while they run (see Persistent Bar above).
 - For `type: custom`: launches a local Python/HTML app from the plugin directory
 - **Security:** `launch_command` (and any per-plugin flags) comes from a server-controlled manifest. `process_manager.py` must invoke it as an argv list with `shell=False` — never interpolate it into a shell string. Treat it as untrusted input from the same trust boundary as the plugin zip itself.
 
@@ -92,22 +94,25 @@ For website buttons:
   - `POST /telemetry/<machine_id>` — receives last-seen, current activity, errors
   - Web admin portal at `/admin`
 
-### Staff Recovery
+### Staff Recovery / Recovery Model
 Two-layer recovery system:
 1. **xbindkeys** daemon running at X session level — listens for `RShift+RCtrl+F12` regardless of which app is in front. When triggered, kills all known child processes by name and the systemd service auto-restarts the launcher.
 2. **Admin portal** "Return to Home" button per machine — sets a flag in config response, machine detects it on next poll and clears all child processes.
 
-Process kill list: `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris`, plus any processes launched from plugin install.sh scripts. Each plugin manifest that spawns a long-running process outside `launch_command` itself (e.g. a bundled local server) must declare its process name explicitly — the kill list cannot infer names for arbitrary future plugins.
+This hotkey is the actual safety net for a child stuck in a fullscreen app (the bar itself is covered in that case — see Persistent Bar above). **Verified on real 11e hardware (2026-07-30), both via synthetic (`xdotool key`) and a real physical keypress:** the combo fires correctly through GCompris-qt and TuxMath while each is genuinely fullscreen and focused — neither establishes a blocking active keyboard grab. Both apps also have a clean exit path reachable by the target age group (Escape repeatedly, or an on-screen X/close affordance), so the hotkey is an emergency fallback, not the routine way out.
+
+Process kill list: `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris-qt`, plus any processes launched from plugin install.sh scripts. (Corrected from `gcompris` — Debian trixie only ships the Qt/QML rewrite, `gcompris-qt`; the classic GTK `gcompris` package no longer exists.) Each plugin manifest that spawns a long-running process outside `launch_command` itself (e.g. a bundled local server) must declare its process name explicitly — the kill list cannot infer names for arbitrary future plugins.
 
 ---
 
 ## Open Risks — Verify Before Building Further
 
-These are unverified assumptions the design depends on. Gated verification steps live in `TODO.md` Phase 2 — do not proceed past that gate until resolved.
+Gated verification steps live in `TODO.md` Phase 2. Two of the three original risks here have been verified on real hardware and are resolved below; the rest are still open.
 
-- **Struts vs. real fullscreen.** The persistent-bar design assumes `_NET_WM_STRUT_PARTIAL` + `_NET_WM_STATE_ABOVE` keeps the bar visible over any child window. That's untested against windows that go genuinely fullscreen (not just maximised) — GCompris defaults to fullscreen, TuxMath can too. A true fullscreen window is commonly promoted above struts by the WM. **Fallback if this fails:** Openbox per-application rules in `rc.xml` forcing `<maximized>yes</maximized>` and denying fullscreen/decorations for known plugin processes, rather than relying on struts alone.
-- **Recovery hotkey vs. keyboard grabs.** `xbindkeys` registers a passive root-window grab. An app holding an active keyboard grab (common in fullscreen games) can swallow `RShift+RCtrl+F12` before it reaches xbindkeys — which would fail exactly when a child is stuck in a fullscreen app. Verify this with a real xbindkeys binding under a real fullscreen app, not just at idle.
-- **Website content containment is undecided.** `--app --incognito` plus Zscaler does not stop in-page navigation to uncontrolled content — a child can follow a link off a curated site. Decide on a Chromium managed policy (`URLAllowlist`/`URLBlocklist` in `/etc/chromium/policies/managed/`, see `system/chromium/policies/managed/`) rather than relying on `--app` mode or network filtering alone.
+- **Struts vs. real fullscreen — RESOLVED, design updated.** Confirmed on real hardware: GCompris-qt and TuxMath both go genuinely fullscreen (`_NET_WM_STATE_FULLSCREEN`) and Openbox stacks them above the bar, covering it — struts/above-state do not survive this. Rather than forcing these apps out of fullscreen (which would fight their own layout), the design now accepts this: the bar is guaranteed on the home screen and over non-fullscreen windows only, and the recovery hotkey (next item) covers the fullscreen case.
+- **Recovery hotkey vs. keyboard grabs — RESOLVED, verified working.** Confirmed on real hardware with both a synthetic and a real physical `RShift+RCtrl+F12` press: the combo reaches xbindkeys through GCompris-qt and TuxMath while each is fullscreen and focused. Neither app establishes a blocking active keyboard grab. This is what makes the fullscreen-bar limitation above acceptable rather than a blocker.
+- **Chromium F11 fullscreen-escape — RESOLVED, verified working.** Confirmed on real hardware: F11 inside `--app` mode escaped to real fullscreen and hid the bar. Fixed with `FullscreenAllowed: false` in the Chromium managed policy (`system/chromium/policies/managed/classpad-policy.json`); re-verified on real hardware that F11 is now a no-op.
+- **Website in-page navigation containment is still undecided.** `--app --incognito` plus Zscaler does not stop a child following a link off a curated site to uncontrolled content. The managed policy needs a `URLAllowlist` once the curated site list exists — not yet decided, see `pre-build-decisions.md` §3.
 - **Plugin trust model.** Plugin zips can carry an `install.sh` that runs with elevated privileges via `plugin-install.sh`. Treat plugin upload as an admin-only, trusted-input operation (enforced in the admin portal, Phase 8) — there is no sandboxing of plugin code in this design.
 
 ---
@@ -129,13 +134,15 @@ These are unverified assumptions the design depends on. Gated verification steps
 | Email relay | Unauthenticated SMTP relay (inside school WAN) |
 | Content filtering | Zscaler (school network, pre-existing) |
 | Python version | 3.11+ |
+| Audio | Plain ALSA (`amixer`) — confirmed no PulseAudio/PipeWire on the target image |
 
 ---
 
 ## Key Design Decisions (Do Not Re-debate)
 
 - **Pygame for the launcher, not a browser** — avoids browser artifacts, crash dialogs, and address bar exposure to children
-- **PyGTK bar with EWMH struts** — persistent, always-on-top, works across all apps. The bar stays visible even when apps are running.
+- **PyGTK bar with EWMH struts** — always-on-top on the home screen and over non-fullscreen apps. Does not survive genuinely fullscreen children (verified on real hardware); the recovery hotkey is the safety net for those, not the bar. See "Recovery model" under Staff Recovery.
+- **No "Call Teacher" feature** — cut from scope. The teacher is physically present in the classroom; a dedicated hardware hotkey for this was considered and rejected since there's no way to reach it during a fullscreen app anyway (same limitation as the bar).
 - **Chromium `--app` not `--kiosk`** — `--kiosk` overrides struts and hides the bar. `--app` mode removes address bar/tabs without going truly fullscreen, so the bar remains visible.
 - **No login** — single shared OS user per machine, auto-login via LightDM
 - **Plugin system** — apps are zip bundles with a manifest. The launcher is generic and does not hardcode any app names.

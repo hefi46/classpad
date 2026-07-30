@@ -19,21 +19,21 @@ Work through these phases in order. Each phase should be functional and testable
 
 Build this first — it needs to be running before the launcher so you can verify strut behaviour.
 
-- [ ] Create `bar/bar.py` — GTK window, fixed height 55px, full screen width, positioned at top
-- [ ] Set `_NET_WM_STATE_ABOVE` (always-on-top)
-- [ ] Set `_NET_WM_STRUT_PARTIAL` to reserve 55px at top of screen so other windows do not overlap it
-- [ ] Add Home button (left side) — placeholder action: print to stdout for now
-- [ ] Add live clock (centre) — updates every second
-- [ ] Add "Call Teacher" button (right side) — placeholder for now
-- [ ] Add current activity label (between Home and clock) — reads from a shared state file `/tmp/classpad_activity`
-- [ ] Add volume control (bar is the only place a teacher/child can reach it — not optional)
-- [ ] Add debounce/rate-limit to "Call Teacher" (disable briefly after press)
-- [ ] Test: open TuxPaint or any maximised window — bar must remain visible above it
-- [ ] Test: use `xprop` on the bar window to verify strut and state hints are set correctly
-- [ ] **GATE — do not proceed to Phase 3 until this passes:** `sudo apt install gcompris tuxmath` and launch each fullscreen (not just maximised). Check `xprop -id $(xdotool getactivewindow) _NET_WM_STATE` for `_NET_WM_STATE_FULLSCREEN` and confirm the bar is still visible/above. This is the load-bearing assumption behind the whole persistent-bar design — see CLAUDE.md "Open Risks."
-- [ ] **GATE:** install `xbindkeys` now (ahead of Phase 6) and bind `RShift+RCtrl+F12` to a placeholder (`touch /tmp/classpad_hotkey_test`). With gcompris/tuxmath fullscreen and focused, confirm the binding still fires — a fullscreen app's keyboard grab can swallow it before it reaches xbindkeys.
-- [ ] If either gate fails: do not redesign the bar — instead add Openbox `<application>` rules in `rc.xml` forcing `maximized=yes` and denying fullscreen for known plugin process names, then re-test.
-- [ ] Make bar auto-start via Openbox `autostart` file
+- [x] Create `bar/bar.py` — GTK window, fixed height 55px, full screen width, positioned at top
+- [x] Set `_NET_WM_STATE_ABOVE` (always-on-top)
+- [x] Set `_NET_WM_STRUT_PARTIAL` to reserve 55px at top of screen so other windows do not overlap it — implemented via `python3-xlib` directly (`Gdk.Window.property_change` isn't exposed by GObject-Introspection in this binding)
+- [x] Add Home button (left side) — placeholder action: print to stdout for now
+- [x] Add live clock (centre) — updates every second
+- [x] Add current activity label (between Home and clock) — reads from a shared state file `/tmp/classpad_activity`
+- [x] Add volume control (bar is the only place it's reachable — not optional)
+- [x] Test: open TuxPaint (non-fullscreen) — bar remains visible above it (verified on real hardware)
+- [x] Test: use `xprop` on the bar window to verify strut and state hints are set correctly (verified: `_NET_WM_STRUT_PARTIAL`, `_NET_WM_STATE_ABOVE`, `_NET_WM_WINDOW_TYPE_DOCK` all correct; `_NET_WORKAREA` correctly reserves the top 55px)
+- [x] **GATE — RUN, real hardware, 2026-07-30:** `gcompris-qt` and `tuxmath` (note: `gcompris` package no longer exists in trixie, only the Qt rewrite) both go genuinely `_NET_WM_STATE_FULLSCREEN` and stack above the bar, covering it. **Result: gate fails as suspected — struts/above-state do not survive real fullscreen.** Decision: accept this rather than force these apps out of fullscreen (see next gate — the hotkey covers it, and both apps have their own reachable exit). See CLAUDE.md "Persistent Bar" and "Recovery model."
+- [x] **GATE — RUN, real hardware, 2026-07-30:** `xbindkeys` bound to `RShift+RCtrl+F12`, tested via both synthetic (`xdotool key`) and real physical keypress, with `gcompris-qt` and `tuxmath` each fullscreen and focused. **Result: passes both times, both apps.** Neither establishes a blocking active keyboard grab. This is what makes accepting the previous gate's failure safe.
+- [x] Confirmed both `gcompris-qt` and `tuxmath` have their own reachable exit (Escape / on-screen close control) for a pre-reading child — the hotkey is an emergency fallback, not the routine way out.
+- [x] **Architecture decision (2026-07-30):** the bar is guaranteed on the home screen and over non-fullscreen apps only, not over genuinely fullscreen ones. No Openbox rules forcing apps out of fullscreen — that fallback wasn't needed since the hotkey gate passed.
+- [x] **"Call Teacher" removed from scope entirely** — no bar button, no debounce logic, no hardware-hotkey substitute. The teacher is physically present in the classroom. (Hardware volume/media keys were investigated as an unrelated volume-control mitigation and found not to generate any event on this hardware at all — see `pre-build-decisions.md` §1b — so that idea is dropped too, not because of this decision.)
+- [x] Make bar auto-start via Openbox `autostart` file (assumes deployment path `/opt/classpad/`, matching the plugin directory convention; xbindkeys and the launcher systemd service are added to this same file in Phases 6/11, not yet)
 
 ---
 
@@ -45,6 +45,7 @@ Build this first — it needs to be running before the launcher so you can verif
   - Reads and validates each `manifest.json`
   - Returns a list of plugin objects sorted by name
 - [ ] Create example manifests for: tuxpaint, tuxtype, tuxmath, a placeholder website button
+  - TuxPaint's `launch_command` should use native fullscreen (`--fullscreen=yes`), not the windowed `--windowed --1366x713` variant tested during the Phase 2 gate — decided 2026-07-30, since TuxPaint has its own reachable exit (same reasoning as gcompris-qt/tuxmath in Phase 2), so it doesn't need the bar visible either. The windowed test was a real proof of concept (confirmed to size and stack correctly) but isn't the chosen approach.
 - [ ] Write unit tests for plugin_manager — valid manifest, missing fields, malformed JSON
 - [ ] Create `scripts/plugin-install.sh` — accepts a plugin zip path, extracts to `/opt/classpad/plugins/<id>/`, runs `install.sh` if present
 - [ ] Harden `plugin-install.sh` against path traversal — reject any archive entry containing `..` or an absolute path *before* extraction, regardless of whether extraction uses `unzip` or `zipfile`. Write a test case with a malicious zip (entry like `../../etc/cron.d/x`) and confirm it's rejected.
@@ -74,7 +75,9 @@ Build this first — it needs to be running before the launcher so you can verif
 - [ ] `launch()` must invoke `launch_command` as an argv list with `shell=False` — never build a shell string. It comes from a server-controlled manifest; treat it as untrusted input.
 - [ ] For `type: app` — launch binary from `launch_command` in manifest
 - [ ] For `type: website` — launch Chromium with correct flags (see CLAUDE.md — use `--app`, NOT `--kiosk`)
-- [ ] Create `system/chromium/policies/managed/classpad-policy.json` setting `URLAllowlist` for curated site domains, and install it to `/etc/chromium/policies/managed/` — `--app --incognito` alone does not stop in-page navigation off a curated site
+- [x] Create `system/chromium/policies/managed/classpad-policy.json` with `FullscreenAllowed: false` — **verified on real hardware (2026-07-30)**: F11 inside `--app` mode was escaping to real fullscreen and hiding the bar; this policy blocks it, confirmed F11 is now a no-op. Also confirmed `--app --start-maximized` alone (no `--kiosk`) already respects the strut correctly — window fills exactly the area below the bar, bar stays stacked on top.
+- [ ] Add `URLAllowlist` to the same policy file once the curated site list is decided — still open, `--app --incognito` alone does not stop in-page navigation off a curated site to uncontrolled content. Don't add a guessed domain list.
+- [ ] Install the policy file to `/etc/chromium/policies/managed/` as part of `scripts/install.sh` (Phase 11) — done manually on the dev machine for this test, not yet automated
 - [ ] When a child process exits, update `/tmp/classpad_activity` to empty and return launcher to home screen
 - [ ] Write current activity name to `/tmp/classpad_activity` on launch (bar reads this)
 - [ ] Test full cycle: click button -> app launches -> app closes -> launcher returns
