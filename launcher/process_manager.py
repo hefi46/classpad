@@ -109,8 +109,12 @@ def wait_for_exit(process=None):
 
 def kill_all():
     global _current_process, _current_chromium_profile_dir
+    # SIGKILL, not the pkill default (SIGTERM) — confirmed on real hardware
+    # that TuxPaint catches SIGTERM and shows an "unsaved changes?" dialog
+    # instead of exiting. This exists for recovery use; it can't depend on a
+    # stuck app cooperating with a graceful shutdown.
     for name in KILL_LIST:
-        subprocess.run(["pkill", name])
+        subprocess.run(["pkill", "-9", name])
     if _current_chromium_profile_dir:
         shutil.rmtree(_current_chromium_profile_dir, ignore_errors=True)
     _current_process = None

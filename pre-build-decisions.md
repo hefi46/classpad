@@ -155,10 +155,11 @@
 
 ## 10. Staff Recovery & Resilience
 
-- [x] Staff key combo agreed — `RShift + RCtrl + F12` (CLAUDE.md)
+- [x] Staff key combo agreed — `Ctrl+Alt+Shift+Escape` (CLAUDE.md). Changed in Phase 6 (2026-07-30) from the F12-based combo tested in the Phase 2 gate — F12 needs the Fn key on a lot of laptop keyboards, which trips up non-technical teaching staff in an actual emergency. No Fn key involved in the new combo.
 - [ ] Key combo communicated how (laminated card, sticker) — non-technical, still open
 - [x] Launcher runs as systemd service, `Restart=always` — confirmed (TODO Phase 6)
-- [x] xbindkeys as OS-level listener — confirmed, and **verified 2026-07-30 on real hardware**: `RShift+RCtrl+F12` (tested as `Ctrl+Shift+F12`) fires correctly through both GCompris-qt and TuxMath while genuinely fullscreen and focused, via synthetic (`xdotool`) and real physical keypresses. Neither app blocks it with an active keyboard grab. This is now the confirmed safety net for the fullscreen-bar limitation above.
+- [x] xbindkeys as OS-level listener — confirmed, and **verified 2026-07-30 on real hardware**: the Phase 2 gate confirmed the mechanism (tested as `Ctrl+Shift+F12`) fires correctly through both GCompris-qt and TuxMath while genuinely fullscreen and focused, via synthetic (`xdotool`) and real physical keypresses, with neither app blocking it via an active keyboard grab. The final `Ctrl+Alt+Shift+Escape` combo was re-verified the same way in Phase 6, with the real `recovery.sh` wired up (not the Phase 2 placeholder binding). This is the confirmed safety net for the fullscreen-bar limitation above.
+- [x] `recovery.sh` uses `SIGKILL` (`pkill -9`), not the default `SIGTERM` — found on real hardware in Phase 6 that TuxPaint catches `SIGTERM` and shows a save-confirmation dialog instead of exiting, defeating the point of an emergency recovery path.
 - [x] Remote reset from admin portal — v1, confirmed ("Return to Home" / `force_home`, TODO Phase 8-9)
 - [x] Process kill list agreed — `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris-qt` (CLAUDE.md, corrected from `gcompris` — Debian trixie only packages the Qt rewrite). Note: the list can't cover arbitrary future plugin processes automatically — CLAUDE.md now requires each plugin that spawns a long-running process to declare its process name explicitly.
 - [x] **"Call Teacher" removed from scope entirely (2026-07-30)** — no hardware hotkey substitute either; the teacher is physically present in the classroom.

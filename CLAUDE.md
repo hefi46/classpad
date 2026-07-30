@@ -115,10 +115,12 @@ For website buttons:
 
 ### Staff Recovery / Recovery Model
 Two-layer recovery system:
-1. **xbindkeys** daemon running at X session level — listens for `RShift+RCtrl+F12` regardless of which app is in front. When triggered, kills all known child processes by name and the systemd service auto-restarts the launcher.
+1. **xbindkeys** daemon running at X session level — listens for `Ctrl+Alt+Shift+Escape` regardless of which app is in front. When triggered, kills all known child processes by name and the systemd service auto-restarts the launcher.
 2. **Admin portal** "Return to Home" button per machine — sets a flag in config response, machine detects it on next poll and clears all child processes.
 
-This hotkey is the actual safety net for a child stuck in a fullscreen app (the bar itself is covered in that case — see Persistent Bar above). **Verified on real 11e hardware (2026-07-30), both via synthetic (`xdotool key`) and a real physical keypress:** the combo fires correctly through GCompris-qt and TuxMath while each is genuinely fullscreen and focused — neither establishes a blocking active keyboard grab. Both apps also have a clean exit path reachable by the target age group (Escape repeatedly, or an on-screen X/close affordance), so the hotkey is an emergency fallback, not the routine way out.
+This hotkey is the actual safety net for a child stuck in a fullscreen app (the bar itself is covered in that case — see Persistent Bar above). **Verified on real 11e hardware:** the Phase 2 gate (2026-07-30) confirmed the underlying mechanism — a generic modifier+key xbindkeys binding (tested as `Ctrl+Shift+F12`), both via synthetic (`xdotool key`) and a real physical keypress, fires correctly through GCompris-qt and TuxMath while each is genuinely fullscreen and focused, since neither establishes a blocking active keyboard grab. The final combo was changed in Phase 6 (2026-07-30) from an F-key to `Ctrl+Alt+Shift+Escape` — F12 requires the Fn key on a lot of laptop keyboards, which is exactly the kind of thing that trips up non-technical teaching staff in an actual emergency — and re-verified on real hardware against TuxMath fullscreen with the real `recovery.sh` wired up. Both TuxPaint/TuxMath-style apps also have a clean exit path reachable by the target age group (Escape repeatedly, or an on-screen X/close affordance), so the hotkey is an emergency fallback, not the routine way out.
+
+Note `recovery.sh` sends `SIGKILL` (`pkill -9`), not the default `SIGTERM` — confirmed on real hardware that TuxPaint catches `SIGTERM` and shows an "unsaved changes?" save dialog instead of exiting. An emergency recovery path can't depend on the stuck app cooperating with a graceful shutdown.
 
 Process kill list: `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris-qt`, plus any processes launched from plugin install.sh scripts. (Corrected from `gcompris` — Debian trixie only ships the Qt/QML rewrite, `gcompris-qt`; the classic GTK `gcompris` package no longer exists.) Each plugin manifest that spawns a long-running process outside `launch_command` itself (e.g. a bundled local server) must declare its process name explicitly — the kill list cannot infer names for arbitrary future plugins.
 
@@ -129,7 +131,7 @@ Process kill list: `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris-qt`, 
 Gated verification steps live in `TODO.md` Phase 2. Two of the three original risks here have been verified on real hardware and are resolved below; the rest are still open.
 
 - **Struts vs. real fullscreen — RESOLVED, design updated.** Confirmed on real hardware: GCompris-qt and TuxMath both go genuinely fullscreen (`_NET_WM_STATE_FULLSCREEN`) and Openbox stacks them above the bar, covering it — struts/above-state do not survive this. Rather than forcing these apps out of fullscreen (which would fight their own layout), the design now accepts this: the bar is guaranteed on the home screen and over non-fullscreen windows only, and the recovery hotkey (next item) covers the fullscreen case.
-- **Recovery hotkey vs. keyboard grabs — RESOLVED, verified working.** Confirmed on real hardware with both a synthetic and a real physical `RShift+RCtrl+F12` press: the combo reaches xbindkeys through GCompris-qt and TuxMath while each is fullscreen and focused. Neither app establishes a blocking active keyboard grab. This is what makes the fullscreen-bar limitation above acceptable rather than a blocker.
+- **Recovery hotkey vs. keyboard grabs — RESOLVED, verified working.** Confirmed on real hardware with both a synthetic and a real physical keypress (Phase 2 gate, then re-verified in Phase 6 with the final `Ctrl+Alt+Shift+Escape` combo and the real `recovery.sh`): the combo reaches xbindkeys through GCompris-qt/TuxMath while each is fullscreen and focused. Neither app establishes a blocking active keyboard grab. This is what makes the fullscreen-bar limitation above acceptable rather than a blocker.
 - **Chromium F11 fullscreen-escape — RESOLVED, verified working.** Confirmed on real hardware: F11 inside `--app` mode escaped to real fullscreen and hid the bar. Fixed with `FullscreenAllowed: false` in the Chromium managed policy (`system/chromium/policies/managed/classpad-policy.json`); re-verified on real hardware that F11 is now a no-op.
 - **Website in-page navigation containment is still undecided.** `--app --incognito` plus Zscaler does not stop a child following a link off a curated site to uncontrolled content. The managed policy needs a `URLAllowlist` once the curated site list exists — not yet decided, see `pre-build-decisions.md` §3.
 - **Plugin trust model.** Plugin zips can carry an `install.sh` that runs with elevated privileges via `plugin-install.sh`. Treat plugin upload as an admin-only, trusted-input operation (enforced in the admin portal, Phase 8) — there is no sandboxing of plugin code in this design.
@@ -230,7 +232,7 @@ classpad/
 │   ├── systemd/
 │   │   └── classpad-launcher.service
 │   ├── xbindkeys/
-│   │   └── xbindkeysrc        # RShift+RCtrl+F12 recovery combo
+│   │   └── xbindkeysrc        # Ctrl+Alt+Shift+Escape recovery combo
 │   └── chromium/
 │       └── policies/
 │           └── managed/

@@ -1,0 +1,10 @@
+# Staff recovery hotkey. Fires regardless of which app has focus (unless the
+# app has established a blocking active keyboard grab — verified on real
+# hardware in Phase 2 that GCompris-qt and TuxMath, the worst case, do not).
+#
+# Ctrl+Alt+Shift+Escape, not an F-key: chosen in Phase 6 over the F12 combo
+# used for the Phase 2 gate testing because F12 requires the Fn key on a lot
+# of laptop keyboards, which is exactly the kind of thing that trips up
+# non-technical teaching staff in an actual emergency.
+"/opt/classpad/scripts/recovery.sh"
+    control+alt+shift + Escape

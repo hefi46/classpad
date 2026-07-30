@@ -1,2 +1,3 @@
 #!/bin/sh
 python3 /opt/classpad/bar/bar.py &
+xbindkeys -f /opt/classpad/system/xbindkeys/xbindkeysrc &

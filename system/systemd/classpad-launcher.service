@@ -1,0 +1,14 @@
+[Unit]
+Description=Classpad Pygame Launcher
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/classpad
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/python3 -m launcher.main
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target

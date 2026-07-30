@@ -195,7 +195,7 @@ def test_kill_all_pkills_every_name_in_kill_list_and_clears_activity(monkeypatch
     process_manager._current_process = FakeProcess()
     process_manager.kill_all()
 
-    assert calls == [["pkill", name] for name in process_manager.KILL_LIST]
+    assert calls == [["pkill", "-9", name] for name in process_manager.KILL_LIST]
     assert activity_file.read_text() == ""
     assert process_manager._current_process is None
 

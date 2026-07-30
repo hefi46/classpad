@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import subprocess
 import time
+from pathlib import Path
 
 import gi
 from Xlib import Xatom
@@ -11,6 +12,7 @@ from gi.repository import Gdk, GLib, Gtk
 
 BAR_HEIGHT = 55
 ACTIVITY_FILE = "/tmp/classpad_activity"
+RECOVERY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "recovery.sh"
 
 
 def set_strut_partial(xid, screen_width, height):
@@ -97,7 +99,11 @@ class Bar(Gtk.Window):
         return True
 
     def _on_home_clicked(self, _button):
-        print("Home pressed")
+        # Killing the tracked child is enough to send the launcher home: its
+        # blocking wait_for_exit() unblocks the moment the process dies, and
+        # it takes care of its own cleanup (activity file, chromium profile
+        # dir) from there — see launcher/process_manager.py.
+        subprocess.Popen(["bash", str(RECOVERY_SCRIPT)])
 
     def _on_volume_changed(self, scale):
         volume = int(scale.get_value())
