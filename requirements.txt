@@ -1,0 +1,3 @@
+pygame
+# python3-gi / gir1.2-gtk-3.0 (PyGTK bindings for bar/) are apt packages, not pip —
+# GObject introspection bindings don't build reliably via pip on this hardware.

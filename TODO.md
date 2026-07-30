@@ -6,12 +6,12 @@ Work through these phases in order. Each phase should be functional and testable
 
 ## Phase 1: Repo & Project Scaffold
 
-- [ ] Create directory structure as defined in CLAUDE.md
-- [ ] Create placeholder `__init__.py` and stub files for each module
-- [ ] Create `requirements.txt` for launcher and bar dependencies
-- [ ] Create `server/requirements.txt` for Flask server
-- [ ] Create `.gitignore` (Python, venv, SQLite files, `__pycache__`)
-- [ ] Verify the project structure matches CLAUDE.md before proceeding
+- [x] Create directory structure as defined in CLAUDE.md
+- [x] Create placeholder `__init__.py` and stub files for each module
+- [x] Create `requirements.txt` for launcher and bar dependencies
+- [x] Create `server/requirements.txt` for Flask server
+- [x] Create `.gitignore` (Python, venv, SQLite files, `__pycache__`)
+- [x] Verify the project structure matches CLAUDE.md before proceeding — `find . -not -path './.git*' | sort` matches the CLAUDE.md tree; non-module directories use `.gitkeep` pending their own phase
 
 ---
 
