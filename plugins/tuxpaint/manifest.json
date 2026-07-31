@@ -3,7 +3,7 @@
   "name": "TuxPaint",
   "version": "1.0.0",
   "type": "app",
-  "launch_command": "/usr/bin/tuxpaint --fullscreen=yes",
+  "launch_command": "/usr/bin/tuxpaint --fullscreen=yes --native",
   "icon": "icon.png",
   "description": "Drawing and painting app"
 }
