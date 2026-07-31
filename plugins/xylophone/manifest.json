@@ -1,0 +1,9 @@
+{
+  "id": "xylophone",
+  "name": "Xylophone",
+  "version": "1.0.0",
+  "type": "custom",
+  "launch_command": "/usr/bin/python3 /opt/classpad/plugins/xylophone/app/xylophone.py",
+  "icon": "icon.png",
+  "description": "Tap the coloured bars to play a note"
+}
