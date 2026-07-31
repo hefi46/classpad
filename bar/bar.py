@@ -20,14 +20,26 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from launcher import config as launcher_config  # noqa: E402
 
 BAR_HEIGHT = 55
-INFO_BUTTON_SIZE = 44
-INFO_BUTTON_MARGIN = 12
+INFO_BUTTON_SIZE = 22
+INFO_BUTTON_MARGIN = 2
+DETAIL_WINDOW_GAP = 4
 ACTIVITY_FILE = "/tmp/classpad_activity"
 RECOVERY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "recovery.sh"
 VOLUME_STEP = 5
 WIFI_POLL_INTERVAL_MS = 5000
 INFO_POLL_INTERVAL_MS = 2000
 NMCLI_TIMEOUT_SECONDS = 3
+
+# Ascending-height bar glyphs for the compact signal-strength indicator —
+# four bars rather than the previous "<dot> SSID" text, since the SSID
+# doesn't fit "hugging the corner" sizing and isn't the thing a teacher
+# glancing at the bar actually needs; SSID/IP move to the hover tooltip
+# (unchanged, see _tick_wifi).
+WIFI_BAR_GLYPHS = ["▁", "▃", "▅", "▇"]  # ▁ ▃ ▅ ▇
+WIFI_COLOR_GOOD = "#2e7d32"
+WIFI_COLOR_FAIR = "#f9a825"
+WIFI_COLOR_WEAK = "#c62828"
+WIFI_COLOR_INACTIVE = "#9e9e9e"
 
 
 def set_strut_partial(xid, screen_width, height):
@@ -45,10 +57,10 @@ def set_strut_partial(xid, screen_width, height):
 
 def get_wifi_status():
     """Pure, GTK-free so it's directly unit-testable. Three nmcli calls
-    rather than one — device/state, active SSID, and IP are three separate
-    nmcli queries — but this only runs every WIFI_POLL_INTERVAL_MS (5s), so
-    the extra process spawns are not a concern the way they would be on a
-    per-frame or per-second tick.
+    rather than one — device/state, active SSID+signal, and IP are three
+    separate nmcli queries — but this only runs every WIFI_POLL_INTERVAL_MS
+    (5s), so the extra process spawns are not a concern the way they would
+    be on a per-frame or per-second tick.
     """
     try:
         devices = subprocess.run(
@@ -59,7 +71,7 @@ def get_wifi_status():
             check=True,
         ).stdout
     except (subprocess.SubprocessError, OSError):
-        return {"connected": False, "ssid": None, "ip": None}
+        return {"connected": False, "ssid": None, "ip": None, "signal": None}
 
     wifi_device = None
     for line in devices.splitlines():
@@ -69,12 +81,13 @@ def get_wifi_status():
             break
 
     if wifi_device is None:
-        return {"connected": False, "ssid": None, "ip": None}
+        return {"connected": False, "ssid": None, "ip": None, "signal": None}
 
     ssid = None
+    signal = None
     try:
         active = subprocess.run(
-            ["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"],
+            ["nmcli", "-t", "-f", "active,ssid,signal", "dev", "wifi"],
             capture_output=True,
             text=True,
             timeout=NMCLI_TIMEOUT_SECONDS,
@@ -82,7 +95,17 @@ def get_wifi_status():
         ).stdout
         for line in active.splitlines():
             if line.startswith("yes:"):
-                ssid = line.split(":", 1)[1]
+                # rsplit off the trailing numeric SIGNAL field rather than a
+                # plain split(":") — an SSID itself may legitimately contain
+                # a colon (nmcli escapes it, but we're tolerant either way,
+                # same as the pre-existing SSID parsing below).
+                rest = line[len("yes:") :]
+                ssid_part, _, signal_part = rest.rpartition(":")
+                ssid = ssid_part
+                try:
+                    signal = int(signal_part)
+                except ValueError:
+                    signal = None
                 break
     except (subprocess.SubprocessError, OSError):
         pass
@@ -103,7 +126,43 @@ def get_wifi_status():
     except (subprocess.SubprocessError, OSError):
         pass
 
-    return {"connected": True, "ssid": ssid, "ip": ip}
+    return {"connected": True, "ssid": ssid, "ip": ip, "signal": signal}
+
+
+def wifi_indicator_markup(status):
+    """Pango markup for the bar's compact top-right icon: signal strength as
+    four ascending bars (colored by tier), not the SSID text — kept pure and
+    GTK-free so the tiering logic is directly unit-testable. The SSID/IP
+    detail stays in the hover tooltip (see _tick_wifi), unchanged.
+    """
+    if not status["connected"]:
+        return f'<span foreground="{WIFI_COLOR_WEAK}">✕</span>'
+
+    signal = status.get("signal")
+    if signal is None:
+        return f'<span foreground="{WIFI_COLOR_INACTIVE}">?</span>'
+
+    level = 0 if signal <= 0 else min(4, -(-signal // 25))  # ceil-div, capped at 4
+    color = WIFI_COLOR_GOOD if signal >= 50 else WIFI_COLOR_FAIR if signal >= 25 else WIFI_COLOR_WEAK
+
+    return "".join(
+        f'<span foreground="{color if i < level else WIFI_COLOR_INACTIVE}">{glyph}</span>'
+        for i, glyph in enumerate(WIFI_BAR_GLYPHS)
+    )
+
+
+def get_serial_number():
+    """The machine's serial, parsed out of the machine_id (`11e-<serial>`,
+    see CLAUDE.md's Network & Deployment Context) rather than calling
+    dmidecode directly — /sys/class/dmi/id/product_serial is root-only
+    (0400) on this hardware, but machine_id is already world-readable
+    (chowned to the kiosk user by install.sh), so no privilege is needed.
+    """
+    machine_id = launcher_config.get_machine_id()
+    prefix = "11e-"
+    if machine_id.startswith(prefix):
+        return machine_id[len(prefix) :]
+    return machine_id
 
 
 def format_relative_time(seconds_ago):
@@ -171,7 +230,12 @@ class Bar(Gtk.Window):
         row.set_margin_end(10)
         overlay.add(row)
 
-        home_button = Gtk.Button(label="Home")
+        # "⌂" (U+2302) rather than a house emoji: confirmed rendering cleanly
+        # in DejaVu Sans (this image's default font, no emoji font present),
+        # while 🏠 shows as a tofu box — same dependency-free Unicode-glyph
+        # approach as the info/refresh/close buttons, no icon-theme lookup.
+        home_button = Gtk.Button(label="⌂")
+        home_button.set_tooltip_text("Home")
         home_button.connect("clicked", self._on_home_clicked)
         row.pack_start(home_button, False, False, 0)
 
@@ -222,11 +286,10 @@ class Bar(Gtk.Window):
 
     def _tick_wifi(self):
         status = get_wifi_status()
+        self.wifi_label.set_markup(wifi_indicator_markup(status))
         if status["connected"]:
-            self.wifi_label.set_markup('<span foreground="#2e7d32">●</span> ' + GLib.markup_escape_text(status["ssid"] or "Wi-Fi"))
             tooltip = f"SSID: {status['ssid'] or 'unknown'}\nIP: {status['ip'] or 'unknown'}"
         else:
-            self.wifi_label.set_markup('<span foreground="#c62828">●</span> No Wi-Fi')
             tooltip = "Not connected"
         self.wifi_label.set_tooltip_text(tooltip)
         return True
@@ -269,8 +332,21 @@ class InfoPanel(Gtk.Window):
         self.set_resizable(False)
 
         button = Gtk.Button(label="ℹ")  # info symbol
+        button.set_relief(Gtk.ReliefStyle.NONE)
+        button.get_style_context().add_class("classpad-info-btn")
         button.connect("clicked", self._on_clicked)
         self.add(button)
+
+        # GTK theme padding on a stock Gtk.Button easily exceeds
+        # INFO_BUTTON_SIZE on its own — zero it out and let the button fill
+        # the (already small) window instead.
+        css = Gtk.CssProvider()
+        css.load_from_data(
+            b".classpad-info-btn { padding: 0; min-width: 0; min-height: 0; }"
+        )
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
 
         self.connect("realize", self._on_realize)
 
@@ -301,11 +377,14 @@ class InfoPanel(Gtk.Window):
         frame = Gtk.Frame()
         window.add(frame)
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        box.set_margin_start(12)
-        box.set_margin_end(12)
-        box.set_margin_top(12)
-        box.set_margin_bottom(12)
+        # Condensed: tight spacing/margins, but the window still sizes itself
+        # to its widest label (the admin URL) rather than a fixed width, so
+        # it's never narrower than the URL needs.
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        box.set_margin_top(8)
+        box.set_margin_bottom(6)
         frame.add(box)
 
         self.admin_url_label = Gtk.Label(xalign=0)
@@ -314,13 +393,28 @@ class InfoPanel(Gtk.Window):
         self.status_label = Gtk.Label(xalign=0)
         box.add(self.status_label)
 
-        refresh_button = Gtk.Button(label="Refresh config now")
-        refresh_button.connect("clicked", self._on_refresh_clicked)
-        box.add(refresh_button)
+        self.serial_label = Gtk.Label(xalign=0)
+        box.add(self.serial_label)
 
-        close_button = Gtk.Button(label="Close")
+        self.nickname_label = Gtk.Label(xalign=0)
+        box.add(self.nickname_label)
+
+        # Icon buttons instead of worded ones, side by side to save the
+        # vertical space a stacked pair of full-width text buttons took —
+        # tooltips carry the words instead.
+        button_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        button_row.set_halign(Gtk.Align.END)
+        box.add(button_row)
+
+        refresh_button = Gtk.Button(label="⟳")
+        refresh_button.set_tooltip_text("Refresh config now")
+        refresh_button.connect("clicked", self._on_refresh_clicked)
+        button_row.add(refresh_button)
+
+        close_button = Gtk.Button(label="✕")
+        close_button.set_tooltip_text("Close")
         close_button.connect("clicked", lambda _b: window.hide())
-        box.add(close_button)
+        button_row.add(close_button)
 
         return window
 
@@ -332,19 +426,31 @@ class InfoPanel(Gtk.Window):
         color_hex = {"green": "#2e7d32", "red": "#c62828", "grey": "#757575"}[color]
         self.status_label.set_markup(f'<span foreground="{color_hex}">●</span> {GLib.markup_escape_text(status_text)}')
 
+        self.serial_label.set_text(f"Serial: {get_serial_number()}")
+
+        # display_name only exists once the server has sent it down and a
+        # poll has cached it locally (see server/models.get_config and
+        # launcher/config.save_cached_config) — a fresh/offline machine has
+        # no cache yet, hence the "not set yet" fallback rather than blank.
+        cached = launcher_config.load_cached_config() or {}
+        nickname = cached.get("display_name")
+        self.nickname_label.set_text(f"Nickname: {nickname or '(not set)'}")
+
     def _on_clicked(self, _button):
         if self.detail_window.get_visible():
             self.detail_window.hide()
             return
         self._refresh_detail_content()
         self.detail_window.show_all()
-        # Positioned above the info button (not below — there's no screen
-        # space below it) after show_all(), since the window needs a real
-        # size allocation before get_size() is meaningful.
+        # Positioned above and right-aligned with the info button (not below
+        # — there's no screen space below it) after show_all(), since the
+        # window needs a real size allocation before get_size() is
+        # meaningful. Measuring the actual width rather than a hardcoded
+        # offset keeps this correct as the panel's content changes size.
         screen = Gdk.Screen.get_default()
-        _width, height = self.detail_window.get_size()
-        x = screen.get_width() - INFO_BUTTON_SIZE - INFO_BUTTON_MARGIN - 220
-        y = screen.get_height() - INFO_BUTTON_SIZE - INFO_BUTTON_MARGIN - height - 8
+        width, height = self.detail_window.get_size()
+        x = screen.get_width() - INFO_BUTTON_MARGIN - width
+        y = screen.get_height() - INFO_BUTTON_SIZE - INFO_BUTTON_MARGIN - height - DETAIL_WINDOW_GAP
         self.detail_window.move(x, y)
 
     def _on_refresh_clicked(self, _button):

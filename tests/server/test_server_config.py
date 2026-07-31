@@ -5,6 +5,7 @@ def test_unknown_machine_gets_empty_config(client):
     assert resp.status_code == 200
     assert resp.get_json() == {
         "machine_id": "11e-brandnew",
+        "display_name": None,
         "plugins": [],
         "force_home": False,
     }
@@ -57,12 +58,22 @@ def test_config_profile_is_shared_across_machines(app, client):
     ]
 
 
-def test_display_name_does_not_affect_config(app, client):
+def test_display_name_surfaces_in_config_but_does_not_affect_plugins(app, client):
     with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint",
+            name="TuxPaint",
+            version="1.0.0",
+            type="app",
+            description="Drawing",
+            zip_filename="tuxpaint.zip",
+        )
+        models.set_profile(["tuxpaint"])
         models.set_display_name("11e-abc123", "blue-3")
 
     data = client.get("/config/11e-abc123").get_json()
-    assert "display_name" not in data
+    assert data["display_name"] == "blue-3"
+    assert data["plugins"] == [{"id": "tuxpaint", "version": "1.0.0"}]
 
     with app.app_context():
         machine = models.get_machine("11e-abc123")

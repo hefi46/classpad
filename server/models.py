@@ -22,7 +22,10 @@ Deployment Context) stays the machine's real identity — free, unique,
 needs no coordination at image time — but is a poor thing to make a teacher
 read off a screen. `display_name` is an optional admin-set friendly label
 ("blue-3") shown in the portal in its place and matched to a physical
-sticker on the machine; the client never sees or uses it.
+sticker on the machine. Also surfaced back to the client itself via
+`get_config()` (2026-08-01) so the bar's info panel can show it — a
+teacher glancing at the info panel wants to confirm "is this blue-3", not
+just see it in the admin portal.
 """
 
 import sqlite3
@@ -228,13 +231,14 @@ def get_config(machine_id: str) -> dict:
     upsert_machine(machine_id)
     db = get_db()
     machine_row = db.execute(
-        "SELECT force_home FROM machines WHERE id = ?", (machine_id,)
+        "SELECT force_home, display_name FROM machines WHERE id = ?", (machine_id,)
     ).fetchone()
     rows = db.execute(
         "SELECT id, version FROM plugins WHERE enabled = 1 ORDER BY position"
     ).fetchall()
     return {
         "machine_id": machine_id,
+        "display_name": machine_row["display_name"],
         "plugins": [{"id": r["id"], "version": r["version"]} for r in rows],
         "force_home": bool(machine_row["force_home"]),
     }
