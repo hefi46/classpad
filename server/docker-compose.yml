@@ -1,0 +1,13 @@
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - classpad_data:/data
+    restart: unless-stopped
+
+volumes:
+  classpad_data:

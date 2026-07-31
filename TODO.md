@@ -114,25 +114,29 @@ the 11e — see CLAUDE.md "Development Environment." Client-side work (Phases
 between hosts. Deployment target: Ubuntu Server on Hyper-V (x86_64, matches
 WSL2 — no multi-arch build needed).
 
-- [ ] Create `server/app.py` — Flask app factory, register blueprints
-- [ ] Create `server/models.py` — SQLite models: Machine, Plugin, Assignment, Config
-- [ ] Implement `GET /config/<machine_id>` — returns JSON: active plugins for this machine, layout order, any pending commands (e.g. `force_home: true`)
-- [ ] Implement `POST /telemetry/<machine_id>` — accepts: last_seen timestamp, current_activity, any errors
-- [ ] Implement `GET /plugins/` — returns plugin catalogue
-- [ ] Implement `GET /plugins/<id>/download` — serves plugin zip file
-- [ ] Create `server/Dockerfile` and `server/docker-compose.yml` — mounts SQLite as a volume
-- [ ] Test all endpoints with curl before building the admin portal
+- [x] Create `server/app.py` — Flask app factory (`create_app(data_dir=None)`). No module-level `app = create_app()`, to avoid `init_db()` running as an import side effect (e.g. during test collection) — gunicorn is pointed at the factory itself via `server.app:create_app()` syntax, not an eagerly-created instance.
+- [x] Create `server/models.py` — plain `sqlite3` (no ORM anywhere else in the project, matches this deployment's small scale), connections scoped to `flask.g` per request since sqlite3 connections aren't thread-safe. Tables: `machines`, `plugins` (with `enabled`/`position` for the shared profile — see revision below). **`Config` is not a table** — it's the JSON payload `get_config()` composes from a machine row + the shared enabled/ordered plugin list + `force_home`. `Machine`/`Plugin` are dataclasses returned by the query functions, matching `plugin_manager.py`'s existing `Plugin` dataclass style.
+- [x] **Revised 2026-07-31, before first commit:** dropped the original per-machine `assignments` join table in favour of a single shared plugin profile — `enabled`/`position` moved onto `plugins` directly, `set_assignments(machine_id, ids)` became `set_profile(ids)` (applies to every machine, no `machine_id` argument at all), and `get_config()` no longer filters by machine. Prompted by reviewing an admin-portal design mockup: per-machine layouts implied a whole assignment-UI-per-machine the admin portal didn't actually need — one classroom shares one app set. Also added `machines.display_name`: the hostname (`11e-<serial>`) stays each machine's real, server-side identity (unique, no imaging-time coordination needed), but an admin can now set a friendly label (`blue-3`) shown in its place in the portal and matched to a physical sticker — purely cosmetic, never sent to or read by the client. See CLAUDE.md "Central Server." Re-verified with the curl gate below after the change (same commands, same result, plus a same-profile-different-machine-id check).
+- [x] Implement `GET /config/<machine_id>` — returns `{machine_id, plugins: [{id, version}, ...] (ordered), force_home}`. Deliberately minimal: just enough for the client to diff against what it has installed (Phase 9/10) — full manifest detail (icon, launch_command) already lives in the locally-installed plugin, not the server. **Decision: unknown `machine_id` auto-registers** (empty plugin list, `force_home: false`) rather than 404ing — Phase 16 has a freshly-imaged machine "register with server" but defines no separate registration endpoint, so the first `/config` or `/telemetry` call is what creates the row. This also matters for Phase 9's cache-fallback logic: a 404 is a *reachable* response (unlike server-down), so if unknown machines 404'd, the client's "server unreachable → use cache" path wouldn't cover it and a brand-new machine would need special-casing.
+- [x] Implement `POST /telemetry/<machine_id>` — accepts `{current_activity, error, force_home_ack}`; `last_seen` is stamped server-side (ISO-8601 UTC string — Python 3.12 deprecates the implicit sqlite3 datetime adapter, so timestamps are stored as strings, not native datetimes). **Decision: `force_home_ack` rides in the telemetry body**, not a separate endpoint — Phase 9 needs the client to ack a handled `force_home` somehow, and telemetry was already going to carry per-machine state each poll, so it doubles as the ack channel instead of inventing a new route now to be discovered/retrofitted in Phase 9.
+- [x] Implement `GET /plugins/` — returns catalogue: `[{id, name, version, type, description}, ...]`
+- [x] Implement `GET /plugins/<id>/download` — validates `id` against `^[a-z0-9][a-z0-9-]*$` (same pattern as `plugin_manager.py`/`plugin-install.sh`) *before* any DB or filesystem access, then `send_from_directory` rather than a hand-joined path — this is the same path-traversal shape CLAUDE.md already calls out for `plugin-install.sh`, just on the server's download path instead of the client's install path.
+- [x] Create `server/Dockerfile` and `server/docker-compose.yml` — mounts SQLite (and plugin zips) via a *named* Docker volume (`classpad_data:/data`, `CLASSPAD_DATA_DIR=/data`), not a bind mount into the checkout, so the DB never lands in git or on a slow `/mnt/c` path. Runs via `gunicorn`, not the Flask dev server (`server/requirements.txt` gained a `gunicorn` line) — bound to the factory via gunicorn's `module:callable()` syntax (`server.app:create_app()`); note gunicorn has no `--factory` flag (that's a uvicorn thing, not gunicorn — tried it first, it errored: "unrecognized arguments: --factory").
+- [x] Test all endpoints with curl before building the admin portal — **ran against the containerized server** (`docker compose up`, not just `flask run`), not just the test client: unknown-machine auto-registration, seeded-plugin catalogue/config/download round trip (real zip bytes back), traversal-id rejection (`UPPERCASE` → 404 before touching disk), and the full `force_home` → ack → cleared cycle, all via `curl` against `localhost:5000`. Confirmed the named volume (not the checkout) held the DB (`server/data/` never created on the host). Unit tests also added: `tests/test_server_config.py`, `tests/test_server_plugins.py` (15 cases, Flask test client + `tmp_path`-isolated `create_app(data_dir=...)`).
 
 ---
 
 ## Phase 8: Admin Portal
 
+**Scope revised 2026-07-31** (see Phase 7's models.py revision note): no per-machine
+plugin assignment — one shared profile, editable in one place. Machines get a
+friendly `display_name` instead of per-machine app selection.
+
 - [ ] Create basic admin portal at `/admin` (single account, credentials in environment variable)
-- [ ] Machine list view: shows all machines, last seen time, current activity
-- [ ] Per-machine view: shows assigned plugins, button layout order, "Return to Home" button
-- [ ] Plugin catalogue view: list all available plugins, upload new plugin zip
-- [ ] Assignment UI: drag-and-drop or checkbox to assign plugins to a machine or group
-- [ ] "Return to Home" action: sets `force_home: true` in config response for that machine, clears after client acknowledges
+- [ ] Machine list view: shows all machines by `display_name` (fallback to hostname if unset), last seen time, current activity, and an inline rename control for `display_name` (`models.set_display_name`) — pair the name with the physical sticker on the machine
+- [ ] Per-machine row action: "Return to Home" button (`models.set_force_home`), no other per-machine app configuration
+- [ ] Plugin profile view: **one shared list** for all machines — checkboxes to enable/disable each catalogue plugin plus drag-and-drop or up/down reordering, saved via `models.set_profile(ordered_ids)`
+- [ ] Plugin catalogue view: list all available plugins (enabled state reflects the shared profile above), upload new plugin zip (`models.upsert_plugin`)
 - [ ] Keep the portal simple — this is an internal tool, not a consumer product
 
 ---
@@ -228,3 +232,4 @@ These are named in `CLAUDE.md` or `pre-build-decisions.md` but have no build pha
 - [ ] Which teacher receives "Send to Teacher" emails — per-machine config, selectable on screen, or fixed? Not addressed by Phase 12 as written (only the *child's* name is picked)
 - [ ] Word processor email format — plain text, PDF, or screenshot
 - [ ] Retention policy for child-generated content (TuxPaint artwork, word processor text, emails) — wipe on reboot, sync to server, or keep indefinitely? Needs a privacy/safeguarding decision before Phase 12 ships, since it handles a child's name and free text
+- [ ] **Admin-portal website-plugin builder** — raised 2026-07-31 while reviewing an admin-portal mockup. Idea: let an admin create a `type: website` plugin directly in the portal (name + url + icon, no zip) since that manifest shape needs no code — the portal would generate the plugin/manifest server-side and add it to the catalogue. Deliberately scoped to `website` only: anything with a `launch_command` or bundled code (`app`/`custom`) still has to be a dev-built, tested zip uploaded the normal way — a portal-generated `launch_command` would reopen the exact untrusted-input risk CLAUDE.md's Plugin System section calls out for manifests. Not assigned a phase; likely a Phase 8 extension once the base portal (profile editing, upload) exists.
