@@ -161,11 +161,13 @@ def test_get_server_url_falls_back_to_file(monkeypatch, tmp_path):
     assert config.get_server_url() == "http://file-configured:5000"
 
 
-def test_get_server_url_none_when_unconfigured(monkeypatch, tmp_path):
+def test_get_server_url_falls_back_to_hardcoded_default_when_unconfigured(monkeypatch, tmp_path):
+    # Rather than requiring explicit configuration on every machine — each
+    # site's own local DNS is expected to resolve "classpad-admin".
     monkeypatch.delenv(config.SERVER_URL_ENV_VAR, raising=False)
     monkeypatch.setattr(config, "SERVER_URL_FILE", tmp_path / "does-not-exist")
 
-    assert config.get_server_url() is None
+    assert config.get_server_url() == config.DEFAULT_SERVER_URL
 
 
 def test_save_and_load_cached_config_round_trip(tmp_path):
@@ -278,6 +280,9 @@ class _PollerHarness:
         monkeypatch.setattr(config, "SERVER_URL_FILE", tmp_path / "server_url")
         monkeypatch.setenv(config.SERVER_URL_ENV_VAR, stub_server_url)
         monkeypatch.setattr(config, "CONFIG_CACHE_FILE", tmp_path / "config_cache.json")
+        self.status_file = tmp_path / "server_status"
+        monkeypatch.setattr(config, "SERVER_STATUS_FILE", self.status_file)
+        monkeypatch.setattr(config, "REFRESH_REQUEST_FILE", tmp_path / "refresh_requested")
         monkeypatch.setattr(process_manager, "ACTIVITY_FILE", str(tmp_path / "classpad_activity"))
         self.kill_all_calls = []
         monkeypatch.setattr(process_manager, "kill_all", lambda: self.kill_all_calls.append(True))
@@ -376,3 +381,91 @@ def test_run_poller_never_blanks_grid_on_empty_reconciled_result(monkeypatch, po
     poller_harness.run_briefly([DummyPlugin(0)], monkeypatch)
 
     assert poller_harness.update_queue.empty()
+
+
+# --- info panel plumbing: server status file + refresh-request ------------
+
+
+def test_refresh_requested_false_when_no_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "REFRESH_REQUEST_FILE", tmp_path / "does-not-exist")
+
+    assert config.refresh_requested() is False
+
+
+def test_refresh_requested_true_and_consumes_the_file(monkeypatch, tmp_path):
+    flag_file = tmp_path / "refresh_requested"
+    flag_file.touch()
+    monkeypatch.setattr(config, "REFRESH_REQUEST_FILE", flag_file)
+
+    assert config.refresh_requested() is True
+    assert not flag_file.exists()
+    assert config.refresh_requested() is False  # consumed, not re-fired
+
+
+def test_run_poller_writes_server_status_ok_on_success(monkeypatch, poller_harness, stub_server):
+    stub_server.config_response = {"machine_id": "11e-TEST", "plugins": [], "force_home": False}
+
+    poller_harness.run_briefly([], monkeypatch)
+
+    status = json.loads((poller_harness.status_file).read_text())
+    assert status["ok"] is True
+    assert "checked_at" in status
+
+
+def test_run_poller_writes_server_status_not_ok_on_failure(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "SERVER_URL_FILE", tmp_path / "server_url")
+    monkeypatch.setenv(config.SERVER_URL_ENV_VAR, "http://127.0.0.1:1")
+    monkeypatch.setattr(config, "CONFIG_CACHE_FILE", tmp_path / "config_cache.json")
+    status_file = tmp_path / "server_status"
+    monkeypatch.setattr(config, "SERVER_STATUS_FILE", status_file)
+    monkeypatch.setattr(config, "REFRESH_REQUEST_FILE", tmp_path / "refresh_requested")
+    monkeypatch.setattr(process_manager, "ACTIVITY_FILE", str(tmp_path / "classpad_activity"))
+    monkeypatch.setattr(config, "scan_plugins", lambda: [])
+
+    update_queue = queue.Queue(maxsize=1)
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=config.run_poller,
+        args=(update_queue, stop_event),
+        kwargs=dict(poll_interval=0.05, telemetry_interval=0.05, tick=0.02),
+        daemon=True,
+    )
+    thread.start()
+    thread.join(timeout=0.3)
+    stop_event.set()
+    thread.join(timeout=1)
+
+    status = json.loads(status_file.read_text())
+    assert status["ok"] is False
+
+
+def test_run_poller_refresh_request_forces_an_immediate_poll(monkeypatch, tmp_path, stub_server, stub_server_url):
+    # poll_interval deliberately huge — the only way a poll happens inside
+    # run_briefly()'s short window is via the refresh-request flag.
+    monkeypatch.setattr(config, "SERVER_URL_FILE", tmp_path / "server_url")
+    monkeypatch.setenv(config.SERVER_URL_ENV_VAR, stub_server_url)
+    monkeypatch.setattr(config, "CONFIG_CACHE_FILE", tmp_path / "config_cache.json")
+    monkeypatch.setattr(config, "SERVER_STATUS_FILE", tmp_path / "server_status")
+    refresh_file = tmp_path / "refresh_requested"
+    monkeypatch.setattr(config, "REFRESH_REQUEST_FILE", refresh_file)
+    monkeypatch.setattr(process_manager, "ACTIVITY_FILE", str(tmp_path / "classpad_activity"))
+    monkeypatch.setattr(config, "scan_plugins", lambda: [DummyPlugin(0)])
+    stub_server.config_response = {"machine_id": "11e-TEST", "plugins": [{"id": "plugin-0"}], "force_home": False}
+    refresh_file.touch()
+
+    update_queue = queue.Queue(maxsize=1)
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=config.run_poller,
+        args=(update_queue, stop_event),
+        kwargs=dict(poll_interval=9999, telemetry_interval=9999, tick=0.02),
+        daemon=True,
+    )
+    thread.start()
+    thread.join(timeout=0.3)
+    stop_event.set()
+    thread.join(timeout=1)
+
+    applied = update_queue.get_nowait()
+    assert [p.id for p in applied] == ["plugin-0"]
+    assert not refresh_file.exists()

@@ -23,7 +23,20 @@ MAX_TILE_SIZE = 260
 # re-read live on every boot.
 SERVER_URL_ENV_VAR = "CLASSPAD_SERVER_URL"
 SERVER_URL_FILE = Path("/opt/classpad/server_url")
+# Hardcoded fallback rather than requiring explicit configuration on every
+# machine — each deployment site runs its own site-local DNS with an entry
+# for the server (CLAUDE.md's Network & Deployment Context), so a fresh
+# machine just needs "classpad-admin" to resolve there and everything else
+# works with zero configuration. The env var / file above stay as an
+# override for testing or a site using a different naming convention.
+DEFAULT_SERVER_URL = "http://classpad-admin:5000"
 CONFIG_CACHE_FILE = Path("/opt/classpad/config_cache.json")
+
+# Cross-process signalling with bar/bar.py's info panel — bar.py and the
+# launcher are separate processes, so this follows the same shared-file
+# convention as process_manager.ACTIVITY_FILE rather than adding real IPC.
+SERVER_STATUS_FILE = Path("/tmp/classpad_server_status")
+REFRESH_REQUEST_FILE = Path("/tmp/classpad_refresh_requested")
 
 POLL_INTERVAL_SECONDS = 30
 TELEMETRY_INTERVAL_SECONDS = 300
@@ -88,9 +101,12 @@ def get_server_url():
     if env_value:
         return env_value.rstrip("/")
     try:
-        return SERVER_URL_FILE.read_text().strip().rstrip("/") or None
+        file_value = SERVER_URL_FILE.read_text().strip().rstrip("/")
+        if file_value:
+            return file_value
     except FileNotFoundError:
-        return None
+        pass
+    return DEFAULT_SERVER_URL
 
 
 def fetch_config(server_url, machine_id, timeout=HTTP_TIMEOUT_SECONDS):
@@ -150,6 +166,29 @@ def reconcile_plugins(server_plugins, local_plugins):
     return [local_by_id[entry["id"]] for entry in server_plugins if entry["id"] in local_by_id]
 
 
+def _write_server_status(ok):
+    # Best-effort — found on real hardware that a stray root/other-user-owned
+    # leftover at this path raises PermissionError, and this call site inside
+    # the `except` branch of run_poller's poll attempt wasn't itself wrapped,
+    # so a failure here crashed the entire poller thread (silently, since
+    # it's a daemon thread) instead of just skipping the status update.
+    try:
+        SERVER_STATUS_FILE.write_text(json.dumps({"ok": ok, "checked_at": time.time()}))
+    except OSError as e:
+        print(f"warning: failed to write server status: {e}", file=sys.stderr)
+
+
+def refresh_requested():
+    """The info panel's "refresh now" button touches REFRESH_REQUEST_FILE from
+    bar.py (a separate process) rather than calling into the poller directly.
+    Consumed (deleted) here so a stale request doesn't keep re-firing.
+    """
+    if REFRESH_REQUEST_FILE.exists():
+        REFRESH_REQUEST_FILE.unlink()
+        return True
+    return False
+
+
 def _read_current_activity():
     try:
         activity = Path(process_manager.ACTIVITY_FILE).read_text().strip()
@@ -200,10 +239,14 @@ def run_poller(
         server_url = get_server_url()
         now = time.monotonic()
 
+        if refresh_requested():
+            last_poll = 0.0  # forces the poll below to run this tick
+
         if server_url and now - last_poll >= poll_interval:
             last_poll = now
             try:
                 response = fetch_config(server_url, machine_id)
+                _write_server_status(ok=True)
                 save_cached_config(response)
                 last_applied_ids = _maybe_enqueue(
                     update_queue, reconcile_plugins(response.get("plugins", []), scan_plugins()), last_applied_ids
@@ -232,6 +275,7 @@ def run_poller(
                         print(f"warning: force_home ack failed: {e}", file=sys.stderr)
             except Exception as e:
                 print(f"warning: config poll failed: {e}", file=sys.stderr)
+                _write_server_status(ok=False)
                 cached = load_cached_config()
                 if cached is not None:
                     last_applied_ids = _maybe_enqueue(
