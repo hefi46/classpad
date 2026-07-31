@@ -108,11 +108,13 @@ For website buttons:
 - **Python Flask** web app
 - **SQLite** database (mounted as Docker volume for persistence)
 - Exposes:
-  - `GET /config/<machine_id>` — returns JSON config for a machine (active plugins, layout)
+  - `GET /config/<machine_id>` — returns JSON config for a machine (the shared plugin profile, layout order, `force_home`)
   - `GET /plugins/` — plugin catalogue
   - `GET /plugins/<id>/download` — download a plugin zip
-  - `POST /telemetry/<machine_id>` — receives last-seen, current activity, errors
+  - `POST /telemetry/<machine_id>` — receives last-seen, current activity, errors, and the client's ack of a handled `force_home`
   - Web admin portal at `/admin`
+- **One shared plugin profile, not per-machine assignment — decided 2026-07-31**, revisited while reviewing an admin-portal design mockup. Every machine's `/config` returns the identical enabled/ordered plugin list; there is no per-machine plugin layout and no plan to add one. This matches the actual use case (one classroom, one shared app set) and keeps the admin portal to a single "edit the profile" screen instead of a per-machine assignment UI. `force_home` stays per-machine — it's a real command aimed at one box, not part of the profile.
+- **Machines have an admin-set friendly `display_name`, separate from their hostname.** The hostname (`11e-<serialnumber>`, see Network & Deployment Context) stays the machine's real identity server-side — free, unique, needs no coordination at image time — but isn't something a teacher should have to read off a screen. `display_name` (e.g. `blue-3`) is optional, admin-editable in the portal, shown in place of the hostname there, and meant to match a physical sticker on the machine. The client never sees or sends its own `display_name`.
 
 ### Staff Recovery / Recovery Model
 Two-layer recovery system:
@@ -168,7 +170,7 @@ Gated verification steps live in `TODO.md` Phase 2. Two of the three original ri
 - **Chromium `--app` not `--kiosk`** — `--kiosk` overrides struts and hides the bar. `--app` mode removes address bar/tabs without going truly fullscreen, so the bar remains visible.
 - **No login** — single shared OS user per machine, auto-login via LightDM
 - **Plugin system** — apps are zip bundles with a manifest. The launcher is generic and does not hardcode any app names.
-- **Local install, central deploy** — apps run locally for performance and offline resilience. The server manages which plugins are assigned to which machines.
+- **Local install, central deploy** — apps run locally for performance and offline resilience. The server manages one shared plugin profile that every machine receives — not per-machine assignment (see "Central Server" above).
 - **SQLite** — sufficient for this deployment scale
 - **Server is local network only** — never cloud-hosted. Student data stays on-premise.
 
@@ -311,7 +313,7 @@ built in WSL2 (also x86_64) runs unmodified there.
 ## Network & Deployment Context
 
 - School network: DHCP, WPA2-Enterprise, PEAP/MSCHAPv2 specifically (confirmed 2026-07-31 — corrected from the earlier generic "PEAP/TTLS"), Zscaler content filtering. `scripts/install.sh` (Phase 11) creates the NetworkManager profile via `nmcli` (`wifi-sec.key-mgmt wpa-eap`, `802-1x.eap peap`, `802-1x.phase2-auth mschapv2`) from `CLASSPAD_WIFI_SSID`/`CLASSPAD_WIFI_IDENTITY`/`CLASSPAD_WIFI_PASSWORD`/`CLASSPAD_WIFI_CA_CERT` env vars — never hardcoded, add-only (never modifies/deletes an existing connection). Actual PEAP association is **unverified** — no RADIUS server available in dev, see TODO.md Phase 11.
-- Machine identity: hostname is `11e-<serialnumber>` (from `dmidecode -s system-serial-number`) and is the authoritative machine ID — `launcher/config.py` (Phase 9) should use `socket.gethostname()` for the `/config/<machine_id>` and `/telemetry/<machine_id>` calls, matching this. `scripts/install.sh` sets the hostname once at install time (requires root; a later boot path might not have it) and also writes it to `/opt/classpad/machine_id` as a fallback record — see `pre-build-decisions.md` §7.
+- Machine identity: hostname is `11e-<serialnumber>` (from `dmidecode -s system-serial-number`) and is the authoritative machine ID server-side (`machines.id`) — `launcher/config.py` (Phase 9) should use `socket.gethostname()` for the `/config/<machine_id>` and `/telemetry/<machine_id>` calls, matching this. `scripts/install.sh` sets the hostname once at install time (requires root; a later boot path might not have it) and also writes it to `/opt/classpad/machine_id` as a fallback record — see `pre-build-decisions.md` §7. Admins additionally give each machine a friendly `display_name` (e.g. `blue-3`) in the admin portal, shown in place of the hostname there and matched to a physical sticker on the machine (see "Central Server" above) — portal-only decoration; the hostname itself does not change and the client never sees or sends its own `display_name`.
 - Central server: local network, Docker — deployment target is Ubuntu Server on Hyper-V, on real server hardware (decided 2026-07-30). Developed separately from the 11e client (see Development Environment above). **Server base URL on the client must be a configurable hostname, not a hardcoded IP** — each deployment site runs its own site-local Windows DNS with an entry for the server, since the server's actual address differs per site. `launcher/config.py` (Phase 9) should read this hostname from config rather than assuming a fixed address.
 - SMTP: unauthenticated relay inside WAN, accepts mail for @education.vic.gov.au and @edumail.vic.gov.au
 - Target deployment: Lenovo ThinkPad 11e 3rd gen (20G9S05P00) and 5th gen (20LRS04R00)

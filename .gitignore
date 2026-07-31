@@ -6,3 +6,5 @@ venv/
 *.sqlite3
 config_cache.json
 .pytest_cache/
+.env
+.env.*

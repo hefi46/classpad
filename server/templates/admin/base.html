@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Classpad Admin{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">Classpad</span>
+      <span class="brand-sub">Admin</span>
+    </div>
+    {% if session.admin %}
+    <form method="post" action="{{ url_for('admin.logout') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="link-btn">Log out</button>
+    </form>
+    {% endif %}
+  </header>
+
+  {% if session.admin %}
+  <nav class="tabs">
+    <a class="tab {{ 'is-active' if request.endpoint == 'admin.machines' else '' }}" href="{{ url_for('admin.machines') }}">Machines</a>
+    <a class="tab {{ 'is-active' if request.endpoint == 'admin.plugins' else '' }}" href="{{ url_for('admin.plugins') }}">Plugins</a>
+  </nav>
+  {% endif %}
+
+  <main class="view">
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+      <ul class="flash-list">
+        {% for message in messages %}<li class="flash">{{ message }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+</body>
+</html>
