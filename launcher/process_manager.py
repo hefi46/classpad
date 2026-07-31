@@ -26,6 +26,19 @@ KILL_LIST = ["chromium", "tuxpaint", "tuxtype", "tuxmath", "gcompris-qt", "xylop
 
 _current_process = None
 _current_chromium_profile_dir = None
+_last_error = None
+
+
+def pop_last_error():
+    """Return and clear the most recent launch error, for telemetry (Phase 9).
+
+    Cleared on read so a single failure is reported once, not resent on every
+    5-minute telemetry tick until the next unrelated launch happens to
+    overwrite it.
+    """
+    global _last_error
+    error, _last_error = _last_error, None
+    return error
 
 
 class LaunchError(Exception):
@@ -75,14 +88,16 @@ def launch(plugin):
     isn't actually installed is a real possibility, not a hypothetical — treated
     as a system boundary rather than crashing the launcher.
     """
-    global _current_process, _current_chromium_profile_dir
+    global _current_process, _current_chromium_profile_dir, _last_error
     profile_dir = tempfile.mkdtemp(prefix=CHROMIUM_PROFILE_PREFIX) if plugin.type == "website" else None
     argv = website_argv(plugin, profile_dir) if profile_dir else build_argv(plugin)
 
     try:
         process = subprocess.Popen(argv, shell=False)
     except OSError as e:
-        print(f"warning: failed to launch '{plugin.id}': {e}", file=sys.stderr)
+        message = f"failed to launch '{plugin.id}': {e}"
+        print(f"warning: {message}", file=sys.stderr)
+        _last_error = message
         if profile_dir:
             shutil.rmtree(profile_dir, ignore_errors=True)
         return None

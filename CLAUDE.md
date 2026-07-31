@@ -32,6 +32,8 @@ A central server (Docker, local network) manages app configuration and deploymen
 - Polls the central server for config updates on a configurable interval
 - Falls back to locally cached config if server is unreachable
 - Runs as a systemd service with `Restart=always`
+- **Server polling (Phase 9), implemented 2026-07-31.** `launcher/config.py`'s `run_poller()` runs on its own daemon thread, started by `main.py` — required because the main thread blocks synchronously in `process_manager.wait_for_exit()` for however long a child app is open (potentially the whole school day), so polling/telemetry can't live in the render loop. The poller never touches pygame or constructs `Button` objects (SDL surface work is main-thread-only); it hands the main thread already-locally-installed `Plugin` objects via a `queue.Queue(maxsize=1)`, which the render loop drains non-blockingly each frame. Server base URL: `CLASSPAD_SERVER_URL` env var if set (test/dev override), else `/opt/classpad/server_url` (written once by `install.sh` from the same env var, mirroring the `machine_id` file pattern) — never a hardcoded address, matching the "Network & Deployment Context" requirement below. **The button grid is never blanked by a poll result** — an enabled-plugins list that matches nothing installed locally (a fresh/misconfigured server profile, or a stale cache) is deliberately left un-applied rather than clearing the current grid; on a 5-year-old's kiosk with a teacher who can't debug it, a stale-but-populated grid is far preferable to an empty screen. Verified on real hardware against a stub HTTP server (not the real Flask server, which wasn't reachable from this host in this session): config-change reordering with no restart, `force_home` killing the running child and returning to the launcher with a `force_home_ack` telemetry POST observed, cache fallback when the stub was killed, and the empty-reconciliation case leaving the grid untouched — including a fresh-process-start with the server down *and* a cache that reconciles to nothing, which still shows the full local plugin set rather than blanking (the initial grid build always comes from a direct local scan, never from cache).
+- `process_manager.kill_all()` (called directly from the poller on `force_home`, not by shelling out to `scripts/recovery.sh`) and `recovery.sh` are only equivalent because their kill lists are kept in sync by hand — both files already carry a "must match" comment; a future plugin added to one and not the other silently reintroduces the same un-killable-process bug the Xylophone plugin hit (see "Process kill list" below).
 
 ### Plugin System
 Each app is a plugin — a zip archive containing:
@@ -247,7 +249,21 @@ classpad/
 └── tests/                     # pytest unit tests (run via python3-pytest, apt-installed)
     ├── test_plugin_manager.py
     ├── test_plugin_install.py
-    └── test_config.py         # Button grid layout math (no display needed)
+    ├── test_process_manager.py
+    ├── test_recovery.py
+    ├── test_config.py         # Button grid layout math + Phase 9 server polling
+    └── server/                # Flask-dependent tests, isolated from the client suite
+        ├── conftest.py         # `flask = pytest.importorskip("flask")` at the top —
+        │                       # this client host (11e) doesn't have Flask installed
+        │                       # by design (server deps live on the WSL2 host); this
+        │                       # guard must live in tests/server/conftest.py
+        │                       # specifically, not the top-level tests/conftest.py —
+        │                       # importorskip in a directory that also collects
+        │                       # non-Flask tests turns a graceful skip into a hard
+        │                       # collection error for the whole run (verified 2026-07-31)
+        ├── test_server_admin.py
+        ├── test_server_config.py
+        └── test_server_plugins.py
 ```
 
 ---

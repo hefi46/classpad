@@ -35,9 +35,11 @@ class FakeProcess:
 def reset_module_state():
     process_manager._current_process = None
     process_manager._current_chromium_profile_dir = None
+    process_manager._last_error = None
     yield
     process_manager._current_process = None
     process_manager._current_chromium_profile_dir = None
+    process_manager._last_error = None
 
 
 @pytest.fixture
@@ -146,6 +148,28 @@ def test_launch_failure_is_logged_not_raised(monkeypatch, activity_file):
     assert process is None
     assert process_manager._current_process is None
     assert not activity_file.exists()
+
+
+def test_launch_failure_records_last_error_for_telemetry(monkeypatch, activity_file):
+    monkeypatch.setattr(subprocess, "Popen", lambda argv, shell: (_ for _ in ()).throw(OSError("No such file")))
+
+    plugin = make_plugin(id="tuxpaint")
+    process_manager.launch(plugin)
+
+    error = process_manager.pop_last_error()
+    assert error is not None
+    assert "tuxpaint" in error
+    assert "No such file" in error
+
+
+def test_pop_last_error_clears_after_read():
+    process_manager._last_error = "boom"
+    assert process_manager.pop_last_error() == "boom"
+    assert process_manager.pop_last_error() is None
+
+
+def test_pop_last_error_defaults_to_none():
+    assert process_manager.pop_last_error() is None
 
 
 def test_wait_for_exit_waits_and_clears_activity(activity_file):

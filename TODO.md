@@ -144,12 +144,33 @@ friendly `display_name` instead of per-machine app selection.
 
 ## Phase 9: Server Polling on Client
 
-- [ ] Update `launcher/config.py` to poll `GET /config/<machine_id>` on startup and every 30 seconds
-- [ ] Machine ID = hostname (from `socket.gethostname()`)
-- [ ] On config change: update button grid without requiring a restart if possible, or restart launcher gracefully
-- [ ] Handle `force_home: true` in config response: call `recovery.sh`, then POST acknowledgement back to server
-- [ ] On server unreachable: log warning, continue with last cached config (write to `/opt/classpad/config_cache.json`)
-- [ ] Send telemetry POST on startup, on activity change, and every 5 minutes
+Server base URL wasn't previously decided beyond "must be configurable, not
+hardcoded" (CLAUDE.md). Resolved here: `CLASSPAD_SERVER_URL` env var (test/dev
+override) falling back to `/opt/classpad/server_url`, a file written once by
+`install.sh` from the same env var — mirroring the already-proven
+`machine_id` file pattern, and avoiding having to template `Environment=`
+into the tracked systemd unit file. `install.sh` gained step `[9/10]` for
+this (steps renumbered `[N/10]`), and its rsync now excludes
+`machine_id`/`server_url`/`config_cache.json` — all three are runtime-
+generated, not part of the repo, and `--delete` would otherwise wipe them on
+every re-run, contradicting the script's own "safe to re-run" claim.
+
+Real Flask server (Phase 7/8) wasn't reachable from this client host in this
+session (different dev machines per the client/server split — see CLAUDE.md
+"Development Environment"). Gated instead against a small stdlib
+`http.server` stub serving canned `/config` responses and logging
+`/telemetry` POSTs to a file — the wire format is exactly `server/models.py`'s
+`get_config()`/`record_telemetry()`, so this isn't a guess at the contract.
+
+- [x] Update `launcher/config.py` to poll `GET /config/<machine_id>` on startup and every 30 seconds — `run_poller()` runs on its own daemon thread (started by `main.py`), required since the main thread blocks synchronously in `wait_for_exit()` for however long a child app is open; the poller can't live in the render loop. It never constructs `Button`/SDL objects itself (main-thread-only) — it hands the main thread already-locally-installed `Plugin` objects via a `queue.Queue(maxsize=1)`.
+- [x] Machine ID = hostname (from `socket.gethostname()`)
+- [x] On config change: update button grid without requiring a restart — reconciles the server's ordered enabled-plugin-id list against `scan_plugins()`'s real local install, filtering out ids not installed locally (that's Phase 10's job); the main loop drains the queue non-blockingly each frame and rebuilds `Button`s only when the reconciled id list actually changed (avoids needless icon-reload disk I/O every 30s poll when nothing changed).
+- [x] **Deliberate addition beyond the checklist wording: the grid is never blanked.** An empty reconciled list (server profile matches nothing installed locally — a fresh/misconfigured server, or a stale cache) is left un-applied rather than clearing the current grid. `plugins: []` from an unconfigured server is indistinguishable on the wire from "admin disabled everything"; blanking a kiosk screen a child is looking at, with a teacher who can't debug it, is a worse failure than briefly showing a stale-but-populated grid.
+- [x] Handle `force_home: true` in config response: call `recovery.sh`, then POST acknowledgement back to server — implemented as a direct call to `process_manager.kill_all()` rather than shelling out to `recovery.sh`, since this thread isn't the one that's stuck (it's the one polling); `kill_all()` has the identical effect (same `KILL_LIST`, both files carry a "must match" comment) with less overhead. Ack is a `POST /telemetry` with `force_home_ack: true`; if that POST itself fails, the next poll simply re-applies `kill_all()` (idempotent) and retries the ack — noted in a code comment so this isn't "fixed" into something more complicated later.
+- [x] On server unreachable: log warning, continue with last cached config (write to `/opt/classpad/config_cache.json`) — caches the **raw server response verbatim** (including `version` fields), not the reconciled/filtered list, since Phase 10 needs `version` to diff installed-vs-catalogue and would otherwise lose it. Every poll/telemetry call is wrapped in a broad `except Exception` — an unhandled exception killing the poller thread would silently disable polling for the rest of the session with zero visible symptom, a failure shape this project has hit repeatedly elsewhere.
+- [x] Send telemetry POST on startup, on activity change, and every 5 minutes — startup and the 5-minute interval both fall out naturally from initializing the last-sent timestamps to epoch zero (no special-cased "send once at start" branch needed); activity change is detected by re-reading `process_manager.ACTIVITY_FILE` on the poller's 1-second tick and comparing against the last value sent. The optional `error` field: `process_manager.launch()` now records the OSError message from a failed launch in a module-level `_last_error`, read-and-cleared (`pop_last_error()`) by the next telemetry send.
+- [x] Reorganized `tests/` so this host can still run its own suite: the server-side commits (Phase 7/8) added `tests/conftest.py` importing `server.app`, which needs Flask — not installed on this client host by design (server deps live on the WSL2 host). Moved the Flask-dependent fixtures + `test_server_*.py` into `tests/server/`, guarded by `pytest.importorskip("flask")` **inside that subdirectory's own conftest.py** — confirmed empirically that the same guard at the top-level `tests/conftest.py` produces a hard collection error for the *entire* suite, not a clean per-directory skip, since conftest import failures aren't scoped the way test failures are. `python3 -m pytest -q` on this host: 116 passed, 1 skipped (server suite, cleanly).
+- [x] **GATE — RUN, real hardware, 2026-07-31:** full cycle against the real `bar.bar` + `launcher.main` processes (not stand-ins), server URL pointed at a local stub via `/opt/classpad/server_url`. Config-change reordering: stub switched from an empty enabled-list to a specific 3-plugin ordered subset (`xylophone`, `tuxpaint`, `youtube-kids`); grid reordered to exactly that set, in that order, within one 30s poll, with no restart — confirmed via `scrot` before/after. `force_home`: launched TuxPaint for real, flipped `force_home: true` in the stub, confirmed TuxPaint was killed and the launcher returned to the home grid, and confirmed via the stub's telemetry log that a `force_home_ack: true` POST was received (plus separately confirmed startup telemetry and activity-change telemetry — `current_activity: "TuxPaint"` — both showed up in the same log). Cache fallback: killed the stub server outright, confirmed via journal (`warning: config poll failed: <urlopen error [Errno 111] Connection refused>`) that the poller logs and keeps running rather than crashing, and that the grid stayed exactly as it was (not blanked). No-match case: stub switched to an enabled-list naming a plugin id installed on no real machine; confirmed the grid stayed unchanged rather than blanking. Worst case for "survives reboot with the server down": with the stub down *and* the on-disk cache itself holding that same no-match response, restarted the launcher process fresh (equivalent to what a reboot does for this code path — a real reboot was skipped since nothing here depends on more than process start, and Phase 11 already proved the process itself reliably comes back across a real reboot) — result was the full local plugin grid (all 10), not blank and not stuck on the stale 3-item cache, since the initial grid build always comes from a direct local scan independent of cache/server state.
 
 ---
 
