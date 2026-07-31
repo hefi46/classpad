@@ -4,7 +4,7 @@ import zipfile
 from io import BytesIO
 
 from server import models
-from tests.conftest import TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
+from tests.server.conftest import TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
 
 
 def _extract_csrf(html: bytes) -> str:
