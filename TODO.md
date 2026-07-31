@@ -79,7 +79,7 @@ Build this first — it needs to be running before the launcher so you can verif
 - [x] For `type: website` — launch Chromium with correct flags (see CLAUDE.md — use `--app`, NOT `--kiosk`). Each launch gets a dedicated `--user-data-dir` (`tempfile.mkdtemp`, cleaned up on exit/kill) — without one, Chromium hands off to an already-running instance on the same profile and the launched process exits immediately, so `wait()` would return while the browser is still on screen. **Verified on real hardware (2026-07-30)** — see gate below.
 - [x] Create `system/chromium/policies/managed/classpad-policy.json` with `FullscreenAllowed: false` — **verified on real hardware (2026-07-30)**: F11 inside `--app` mode was escaping to real fullscreen and hiding the bar; this policy blocks it, confirmed F11 is now a no-op. Also confirmed `--app --start-maximized` alone (no `--kiosk`) already respects the strut correctly — window fills exactly the area below the bar, bar stays stacked on top.
 - [ ] Add `URLAllowlist` to the same policy file once the curated site list is decided — still open, `--app --incognito` alone does not stop in-page navigation off a curated site to uncontrolled content. Don't add a guessed domain list.
-- [ ] Install the policy file to `/etc/chromium/policies/managed/` as part of `scripts/install.sh` (Phase 11) — done manually on the dev machine for this test, not yet automated
+- [x] Install the policy file to `/etc/chromium/policies/managed/` as part of `scripts/install.sh` (Phase 11) — automated in `install.sh` step [4/9]; confirmed present at the installed path on real hardware after the Phase 11 install+reboot gate (2026-07-31)
 - [x] When a child process exits, update `/tmp/classpad_activity` to empty and return launcher to home screen
 - [x] Write current activity name to `/tmp/classpad_activity` on launch (bar reads this)
 - [x] **GATE — RUN, real hardware, 2026-07-30:** full cycle click -> app launches -> app closes -> launcher returns, tested via the real `bar.bar` + `launcher.main` processes (not stand-ins) against the real installed plugins in `/opt/classpad/plugins`, driven by `xdotool` synthetic clicks against the real X server, with `xwininfo`/`xprop`/`scrot` used to verify window state at each step. Two cases: `tuxmath` (type `app`, real fullscreen) closed via its own on-screen close control (the red X, a genuinely reachable child-usable exit, not a kill) — launcher correctly returned and redrew the button grid; `website-placeholder` (type `website`) closed via its window controls — same result. `/tmp/classpad_activity` was observed transitioning correctly at each step (empty -> plugin name -> empty) in both cases.
@@ -165,11 +165,11 @@ friendly `display_name` instead of per-machine app selection.
 
 ## Phase 11: LightDM Auto-Login & Openbox Integration
 
-- [ ] Create `system/lightdm/lightdm.conf` — auto-login for the kiosk user, no password
-- [ ] Create `system/openbox/autostart` — starts bar.py, enables xbindkeys, starts classpad-launcher systemd service
-- [ ] Create `scripts/install.sh` — installs all apt dependencies (including `alsa-utils` — see CLAUDE.md, found missing from the required-packages list on real hardware), copies system files to correct locations, enables systemd service, sets hostname from serial number, sets up PEAP/TTLS WiFi config, unmutes and sets a default volume (`amixer sset Master 70% unmute`) — audio boots muted at 0% on this hardware with no visible error, found and fixed manually on the dev machine 2026-07-30, see CLAUDE.md "Development Environment"
-- [ ] Test full boot-to-launcher flow: power on -> auto-login -> bar appears -> launcher appears
-- [ ] Test reboot recovery: reboot machine, verify everything comes back correctly
+- [x] Create `system/lightdm/lightdm.conf` — auto-login for the kiosk user, no password. Installed as a drop-in (`/etc/lightdm/lightdm.conf.d/50-classpad.conf`) rather than overwriting the package-provided `lightdm.conf`, so it's a one-file rollback.
+- [x] Create `system/openbox/autostart` — starts bar.py, enables xbindkeys, starts classpad-launcher systemd service. The launcher unit is started explicitly from autostart (`systemctl --user start`) rather than `enable`d on `default.target` — enabling would let it activate before X is up, and `Restart=always` would crash-loop every 2s until X exists.
+- [x] Create `scripts/install.sh` — installs all apt dependencies (including `alsa-utils`, `python3-xlib`, and `rsync` — all three found missing from the required-packages list only once actually run on real hardware, see CLAUDE.md), copies system files to correct locations, enables systemd service, sets hostname from serial number via `dmidecode` (also fixes the stale `/etc/hosts` 127.0.1.1 line, found on real hardware), sets up WPA2-Enterprise PEAP/MSCHAPv2 WiFi config from `CLASSPAD_WIFI_*` env vars (add-only, never touches an existing connection), unmutes and sets a default volume (`amixer sset Master 70% unmute`) — audio boots muted at 0% on this hardware with no visible error, found and fixed manually on the dev machine 2026-07-30, see CLAUDE.md "Development Environment". Idempotent/add-only throughout, ordered so the least-reversible step (lightdm autologin) runs last.
+- [x] **GATE — RUN, real hardware, 2026-07-31:** full boot-to-launcher flow — ran `install.sh` on real hardware, rebooted, verified via a live shell against the machine post-reboot (`uptime -s` matched the launcher's own journal start time, confirming this was genuinely post-reboot state and not a leftover process): hostname correctly set to `11e-LR06HKDE` from `dmidecode` and matching `/opt/classpad/machine_id`; `classpad` user autologin succeeded (bar.py, launcher.main, and xbindkeys all running as `classpad`, launcher.main confirmed in the `classpad-launcher.service` cgroup); `amixer` showed Master at 70% unmuted; lightdm drop-in and Chromium managed policy both present at their installed paths. `xprop -root _NET_WORKAREA` showed `0,55,1366,713` (bar strut correctly reserved) and a `scrot` screenshot confirmed the bar (Home button, clock, volume slider) and the launcher's button grid both actually render, not just that the processes exist.
+- [x] **GATE — RUN, real hardware, 2026-07-31:** reboot recovery — same run as above; everything came back on its own with no manual intervention (no manual `startx`, no manually-started service) purely from LightDM autologin + Openbox autostart + the systemd user unit, closing out the "does this survive a real reboot" question install.sh existed to answer.
 
 ---
 
@@ -197,10 +197,27 @@ friendly `display_name` instead of per-machine app selection.
 
 ## Phase 14: Custom Apps — Xylophone
 
-- [ ] Create `plugins/xylophone/app/` — HTML5 or Pygame app
-- [ ] 8 large coloured keys (C major scale)
-- [ ] Each key plays the correct note on click/tap
-- [ ] Keys sized appropriately for small hands
+Before building, checked whether GCompris-qt (already installed, already a
+planned plugin) covers this via its `play_piano`/`piano_composition`
+activities (`gcompris-qt --launch play_piano`) instead of building from
+scratch. Rejected on real hardware evidence: `play_piano` at level 1 is a
+note-matching quiz ("click the keys that match the given notes", scored),
+not free play; its Qt Multimedia audio stack requires PulseAudio and printed
+`No audio device detected` on this plain-ALSA image (CLAUDE.md's documented
+audio decision), so no sound played at all; and it silently pulled a
+background-music asset from `cdn.kde.org` mid-session despite this project's
+local-only/offline-resilient design. Built custom in Pygame instead, reusing
+the launcher's own window/mixer pattern.
+
+- [x] Create `plugins/xylophone/app/xylophone.py` — Pygame app, windowed (not fullscreen) at the same geometry as the launcher below the bar, so the bar's Home button stays visible and is the only exit needed (no custom back button). Sound path (`pygame.mixer.pre_init(frequency=48000, ...)`) matches the launcher's own ALSA underrun fix (CLAUDE.md, 2026-07-31) — same hardware, same fix needed.
+- [x] 8 large coloured keys (C major scale, C4-C5) — rainbow order, one key per column, full window height/width
+- [x] Each key plays the correct note on click/tap — 8 tones generated via stdlib `wave`+`sine`+decay envelope (same approach as `click.wav`, no bundled audio asset), one `pygame.mixer.Sound` per key, played on `MOUSEBUTTONDOWN` (safe here — unlike the launcher's own press/release fix, no new window is created by this click, so Openbox's click-to-focus grab isn't at risk)
+- [x] Keys sized appropriately for small hands — ~170px wide x full window height at 1366x768
+- [x] **Bug found and fixed on real hardware (2026-07-31):** a `custom`-type plugin invoked as `python3 <script>` shows up in `ps`/`pkill` as `python3` — indistinguishable from the launcher's and bar's own processes (also literally `python3`), so it couldn't be added to `process_manager.KILL_LIST`/`recovery.sh` by that name without also matching the launcher/bar. First real end-to-end test caught this directly: clicking Home cleared the activity label but the xylophone process was still alive and the launcher stayed blocked in `wait()`, screen never returned. Fixed by having `xylophone.py` rename its own process via `ctypes`/`prctl(PR_SET_NAME)` to `xylophone` at startup, then adding `xylophone` to both kill lists. Re-verified on real hardware after the fix: `ps` shows `comm=xylophone`, and both the bar's Home button and the `Ctrl+Alt+Shift+Escape` recovery hotkey now correctly kill it and return the launcher to the home screen.
+- [x] **GATE — RUN, real hardware, 2026-07-31:** full real end-to-end cycle via the actual `bar.bar` + `launcher.main` processes against the real installed plugin (not a stand-in) — button click launches it, bar shows "Xylophone" as the activity, a key press shows the visual pressed-highlight, Home returns cleanly (post-fix), and the recovery hotkey independently also returns cleanly. Not independently confirmed by ear whether the note audio was audible on the classroom speakers (asked but no confirmation received in-session) — worth a manual listen.
+- [x] Note-name labels (C D E F G A B C) on each key, large and outlined for contrast against every key color.
+- [x] Computer-keyboard bindings, one per key: Z X C V B N M , — the standard "bottom QWERTY row" virtual-piano layout, which happens to be exactly 8 keys and lines up with a single C4-C5 octave. Each key also shows a small "keycap" badge (distinct styling from the note-name label, since e.g. the E key's *keycap* letter is "C" while a different key's *note name* is also "C" — the two would be ambiguous without a clearly different visual treatment). Verified on real hardware: pressing a bound key plays that note and shows the same press-highlight as a mouse click.
+- [x] Glissando: dragging the mouse across keys with the button held plays each key it crosses (like sliding a mallet across a real xylophone), not just the key first pressed. Verified on real hardware via a synthetic drag from C4 to C5 — the highlight (and the underlying `Sound.play()` calls) followed the drag through every key in between.
 
 ---
 

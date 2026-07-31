@@ -17,6 +17,14 @@ FPS = 30
 def main():
     os.environ.setdefault("SDL_VIDEO_WINDOW_POS", f"0,{BAR_HEIGHT}")
 
+    # Hardware (HDA Intel PCH) only runs natively at 48000Hz — pygame's mixer
+    # default of 44100Hz forces ALSA to resample continuously for the life of
+    # the process (SDL keeps the stream open, not just while a sound plays),
+    # which was causing periodic ALSA underruns under the launcher's own CPU
+    # load (found on real hardware, 2026-07-31). Matching the native rate
+    # removes that resampling; the larger buffer adds slack against
+    # scheduling jitter from the render loop.
+    pygame.mixer.pre_init(frequency=48000, size=-16, channels=2, buffer=4096)
     pygame.init()
     screen_width = pygame.display.Info().current_w
     screen_height = pygame.display.Info().current_h

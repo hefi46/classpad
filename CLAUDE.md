@@ -22,7 +22,7 @@ A central server (Docker, local network) manages app configuration and deploymen
 - Clicking Home kills all child processes and signals the launcher to return to the home screen
 - All other apps (Pygame launcher, Chromium, TuxPaint etc.) run in the remaining screen area below the bar
 - **Verified on real 11e hardware (2026-07-30):** struts/above-state reliably keep the bar visible over the launcher and any non-fullscreen window (`_NET_WORKAREA` correctly reserves the top 55px). They do **not** survive a genuinely fullscreen child — GCompris-qt and TuxMath both set `_NET_WM_STATE_FULLSCREEN` and Openbox stacks them above the bar, covering it entirely. This is a known, accepted limitation, not a bug to fix: see "Recovery model" below for why it's still safe.
-- Hardware volume keys were investigated as a bar-independent volume path (relevant since volume is unreachable while the bar is covered) but don't currently generate any input event on this hardware at the kernel level, despite `thinkpad_acpi` advertising `KEY_VOLUMEUP`/`KEY_VOLUMEDOWN` as capabilities. Not pursued further — the on-screen slider is the only volume control, and it's unavailable during fullscreen apps.
+- Hardware volume keys were investigated as a bar-independent volume path (relevant since volume is unreachable while the bar is covered) but don't currently generate any input event on this hardware at the kernel level, despite `thinkpad_acpi` advertising `KEY_VOLUMEUP`/`KEY_VOLUMEDOWN` as capabilities. **Re-checked on real hardware (2026-07-31)** with `evtest` against `/dev/input/event8` ("ThinkPad Extra Buttons") across two separate real-time capture windows while physically pressing the volume keys: zero `EV_KEY` events of any kind, confirming this isn't a fluke — the capability is advertised but genuinely never fires from this firmware/kernel combination. Not pursued further — the on-screen slider is the only volume control, and it's unavailable during fullscreen apps.
 
 ### Pygame Launcher (home screen)
 - **Pygame** fullscreen window occupying the non-bar area
@@ -125,7 +125,7 @@ This hotkey is the actual safety net for a child stuck in a fullscreen app (the 
 
 Note `recovery.sh` sends `SIGKILL` (`pkill -9`), not the default `SIGTERM` — confirmed on real hardware that TuxPaint catches `SIGTERM` and shows an "unsaved changes?" save dialog instead of exiting. An emergency recovery path can't depend on the stuck app cooperating with a graceful shutdown.
 
-Process kill list: `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris-qt`, plus any processes launched from plugin install.sh scripts. (Corrected from `gcompris` — Debian trixie only ships the Qt/QML rewrite, `gcompris-qt`; the classic GTK `gcompris` package no longer exists.) Each plugin manifest that spawns a long-running process outside `launch_command` itself (e.g. a bundled local server) must declare its process name explicitly — the kill list cannot infer names for arbitrary future plugins.
+Process kill list: `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris-qt`, `xylophone`, plus any processes launched from plugin install.sh scripts. (Corrected from `gcompris` — Debian trixie only ships the Qt/QML rewrite, `gcompris-qt`; the classic GTK `gcompris` package no longer exists.) Each plugin manifest that spawns a long-running process outside `launch_command` itself (e.g. a bundled local server) must declare its process name explicitly — the kill list cannot infer names for arbitrary future plugins. **Found on real hardware (2026-07-31), building the Xylophone plugin (Phase 14):** any `custom`-type plugin invoked as `python3 <script>` shows up in `ps`/`pkill` as `python3` — indistinguishable from the launcher's and bar's own processes (both are also literally `python3`), so it can't just be added to the kill list by its interpreter name without also matching (and killing) the launcher/bar. `plugins/xylophone/app/xylophone.py` renames itself via `ctypes`/`prctl(PR_SET_NAME)` at startup so it gets its own kill-list entry (`xylophone`) instead. Any future Python-based `custom` plugin needs the same treatment.
 
 ---
 
@@ -270,9 +270,9 @@ files plus `git log`, not from any state carried over from the other host.
   ```
   openbox obconf lightdm lightdm-gtk-greeter
   python3 python3-pip python3-pygame
-  python3-gi python3-gi-cairo gir1.2-gtk-3.0
-  chromium git curl xbindkeys x11-utils xdotool
-  alsa-utils
+  python3-gi python3-gi-cairo gir1.2-gtk-3.0 python3-xlib
+  chromium git curl rsync xbindkeys x11-utils xdotool
+  alsa-utils network-manager
   ```
   `alsa-utils` (provides `amixer`, used by the bar's volume slider) was
   missing from this list until found on real hardware — the ALSA kernel
@@ -280,6 +280,14 @@ files plus `git log`, not from any state carried over from the other host.
   installed, every volume-slider drag silently failed (`Popen` on a
   nonexistent binary). Worth checking for on any fresh image; there's no
   visible symptom of this beyond "the slider doesn't seem to do anything."
+  `python3-xlib` (imported as `Xlib` by `bar/bar.py` for the strut hints)
+  and `rsync` (used by `scripts/install.sh` to deploy the repo to
+  `/opt/classpad` — not present on this image by default, unlike the rest
+  of this list) were two more such gaps, both found while actually running
+  `scripts/install.sh` (Phase 11) on real hardware — same failure shape as
+  `alsa-utils`, silent/absent until something tries to use them.
+  `network-manager` is present by default on this image but listed
+  explicitly since Phase 11's WiFi setup depends on `nmcli`.
 - **X11 debugging tools**: `xprop` and `xwininfo` (in x11-utils) — use these to verify EWMH struts and window states
 - **Audio boots muted on this hardware.** `Master` and `Capture` are muted
   and at 0% out of the box (confirmed via the `platform::mute`/
@@ -290,6 +298,7 @@ files plus `git log`, not from any state carried over from the other host.
   a sane default (`amixer sset Master 70% unmute`, matching the bar's
   default slider position) as part of first-boot setup, or a freshly imaged
   machine will be silent with no visible error.
+- **Recurring ALSA underruns from the launcher — found on real hardware (2026-07-31), partially mitigated, not fully root-caused.** The systemd journal showed `ALSA lib pcm.c:(snd_pcm_recover) underrun occurred` from `launcher.main` recurring every 1-7 minutes, unrelated to actual button clicks (it happened while idle, not just when `click.wav` plays — SDL keeps the mixer's ALSA stream open for the whole process lifetime, not just while a sound plays). One suspect: `click.wav` is 44100Hz, pygame's mixer defaults to 44100Hz, but this hardware's HDA Intel PCH codec only runs natively at 48000Hz, so ALSA was continuously resampling — added `pygame.mixer.pre_init(frequency=48000, size=-16, channels=2, buffer=4096)` in `launcher/main.py` before `pygame.init()` to request the native rate directly and give a larger buffer. **This did not fully fix it**: verified on real hardware, one underrun still recurred ~4.5 minutes after restart (vs. every 1-7 min before), suggesting the resample wasn't the whole story — the launcher's own render loop runs at ~54-63% CPU on this Celeron N, and periodic scheduling contention for the audio thread is a more likely root cause than sample-rate mismatch alone. `snd_pcm_recover` self-heals the stream automatically each time, so this has not been observed to cause an audible glitch (just a defensive-recovery log line) — treat as a known, low-severity open item, not a fixed bug. If it needs to go away entirely, next step would be profiling whether the render loop itself can be cheaper (or given real-time scheduling priority for the audio thread) rather than further mixer tuning.
 
 **Server dev machine**: Windows, via WSL2 + Docker — decided 2026-07-30. Keep
 the repo checkout on the native WSL2 filesystem (e.g. `~/classpad`), not
@@ -303,8 +312,8 @@ built in WSL2 (also x86_64) runs unmodified there.
 
 ## Network & Deployment Context
 
-- School network: DHCP, WPA2-Enterprise (PEAP/TTLS), Zscaler content filtering
-- Machine hostnames: `11e-<serialnumber>` (from `dmidecode -s system-serial-number`) — this is the machine's real identity (OS hostname, server-side `machines.id`, kept for uniqueness with zero imaging-time coordination). Admins additionally give each machine a friendly `display_name` (e.g. `blue-3`) in the admin portal, matched to a physical sticker on the machine — see "Central Server" above. The hostname itself does not change.
-- Central server: local network, Docker — deployment target is Ubuntu Server on Hyper-V, on real server hardware (decided 2026-07-30). Developed separately from the 11e client (see Development Environment above).
+- School network: DHCP, WPA2-Enterprise, PEAP/MSCHAPv2 specifically (confirmed 2026-07-31 — corrected from the earlier generic "PEAP/TTLS"), Zscaler content filtering. `scripts/install.sh` (Phase 11) creates the NetworkManager profile via `nmcli` (`wifi-sec.key-mgmt wpa-eap`, `802-1x.eap peap`, `802-1x.phase2-auth mschapv2`) from `CLASSPAD_WIFI_SSID`/`CLASSPAD_WIFI_IDENTITY`/`CLASSPAD_WIFI_PASSWORD`/`CLASSPAD_WIFI_CA_CERT` env vars — never hardcoded, add-only (never modifies/deletes an existing connection). Actual PEAP association is **unverified** — no RADIUS server available in dev, see TODO.md Phase 11.
+- Machine identity: hostname is `11e-<serialnumber>` (from `dmidecode -s system-serial-number`) and is the authoritative machine ID server-side (`machines.id`) — `launcher/config.py` (Phase 9) should use `socket.gethostname()` for the `/config/<machine_id>` and `/telemetry/<machine_id>` calls, matching this. `scripts/install.sh` sets the hostname once at install time (requires root; a later boot path might not have it) and also writes it to `/opt/classpad/machine_id` as a fallback record — see `pre-build-decisions.md` §7. Admins additionally give each machine a friendly `display_name` (e.g. `blue-3`) in the admin portal, shown in place of the hostname there and matched to a physical sticker on the machine (see "Central Server" above) — portal-only decoration; the hostname itself does not change and the client never sees or sends its own `display_name`.
+- Central server: local network, Docker — deployment target is Ubuntu Server on Hyper-V, on real server hardware (decided 2026-07-30). Developed separately from the 11e client (see Development Environment above). **Server base URL on the client must be a configurable hostname, not a hardcoded IP** — each deployment site runs its own site-local Windows DNS with an entry for the server, since the server's actual address differs per site. `launcher/config.py` (Phase 9) should read this hostname from config rather than assuming a fixed address.
 - SMTP: unauthenticated relay inside WAN, accepts mail for @education.vic.gov.au and @edumail.vic.gov.au
 - Target deployment: Lenovo ThinkPad 11e 3rd gen (20G9S05P00) and 5th gen (20LRS04R00)
