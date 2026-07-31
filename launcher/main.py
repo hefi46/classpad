@@ -1,11 +1,13 @@
 import os
+import queue
+import threading
 from pathlib import Path
 
 import pygame
 
 from launcher import process_manager
 from launcher.button import Button
-from launcher.config import build_button_grid
+from launcher.config import build_button_grid, run_poller
 from launcher.plugin_manager import scan_plugins
 
 BAR_HEIGHT = 55  # must match bar/bar.py
@@ -38,6 +40,20 @@ def main():
     plugins = scan_plugins()
     buttons = [Button(plugin, rect) for plugin, rect in build_button_grid(plugins, screen_width, window_height)]
 
+    # run_poller() blocks on network I/O and would stall this render loop if
+    # called directly — it also has to keep running while wait_for_exit()
+    # below blocks the main thread for however long a child app is open, so
+    # it lives on its own daemon thread. It never touches pygame itself
+    # (Button() does SDL surface work, main-thread only); it just hands
+    # already-locally-installed Plugin objects to update_queue for this loop
+    # to turn into Buttons when convenient.
+    update_queue = queue.Queue(maxsize=1)
+    poller_stop = threading.Event()
+    poller_thread = threading.Thread(
+        target=run_poller, args=(update_queue, poller_stop), daemon=True
+    )
+    poller_thread.start()
+
     clock = pygame.time.Clock()
     running = True
 
@@ -63,12 +79,22 @@ def main():
                         for other in buttons:
                             other.set_hovered(False)
 
+        try:
+            new_plugins = update_queue.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            buttons = [
+                Button(plugin, rect) for plugin, rect in build_button_grid(new_plugins, screen_width, window_height)
+            ]
+
         screen.fill(BACKGROUND_COLOR)
         for button in buttons:
             button.draw(screen)
         pygame.display.flip()
         clock.tick(FPS)
 
+    poller_stop.set()
     pygame.quit()
 
 

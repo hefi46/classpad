@@ -1,5 +1,7 @@
 import pytest
 
+flask = pytest.importorskip("flask")
+
 from server.app import create_app
 
 TEST_ADMIN_USERNAME = "admin"
