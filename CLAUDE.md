@@ -79,6 +79,10 @@ my-plugin/
 
 **Security:** plugin zips are trusted-admin input, not arbitrary uploads — `install.sh` runs with the same privileges as the install process (expected: root), so anyone who can push a plugin owns every machine. `plugin-install.sh` must reject archive entries containing `..` or absolute paths before extraction (path traversal), regardless of whether extraction uses `unzip` or Python's `zipfile`. It must also validate the manifest's `id` field against the `^[a-z0-9][a-z0-9-]*$` pattern *before* using it to build any filesystem path (e.g. the install target or an `rm -rf` target) — a malicious or malformed `id` (`../../etc`, empty string, `a/b`) is a second, independent path-traversal vector alongside archive entry names. Plugin upload is admin-portal-only (see Central Server / Admin Portal below) — there is no public or unauthenticated upload path.
 
+**Bug found and fixed on real hardware (2026-07-31), building Phase 10:** `plugin-install.sh` creates its extraction staging dir via `mktemp -d` (mode `0700`), then does `cp -a "$PLUGIN_ROOT/." "$TARGET_DIR/"` to install — `cp -a`'s attribute preservation propagates that `0700` onto `$TARGET_DIR` itself (confirmed by isolating the exact line with `bash -x` and `stat` before/after), leaving the installed plugin unreadable by anyone but root. This is a pre-existing bug in the script itself (Phase 3), not specific to Phase 10 — it just never surfaced before, because every previous invocation was same-user (whoever ran the install script could also read what it produced). Phase 10 is the first caller where the installer (root, via the plugin-deploy timer below) and the reader (`classpad`) are genuinely different users, which is exactly when it surfaced: a freshly-installed plugin was invisible to `plugin_manager.scan_plugins()` and unreadable by the launcher. Fixed with `chmod -R a+rX "$TARGET_DIR"` after the copy — read+execute only, not write, since installed plugin content is meant to be read-only once deployed. Any future direct/manual invocation of `plugin-install.sh` as root benefits from this fix too, not just the automated path.
+
+**Plugin deployment daemon (Phase 10), added 2026-07-31.** `scripts/plugin_deploy.py`, run by `system/systemd/classpad-plugin-deploy.timer` (`OnUnitActiveSec=5min`) via a `Type=oneshot` service — deliberately a separate **system-level** (root) systemd unit, not folded into the Phase 9 launcher poller thread. Plugin `install.sh` scripts need root by design (see Security above), but the launcher itself runs as the unprivileged `classpad` kiosk user and should stay that way; giving `classpad` narrow `NOPASSWD` sudo for just `plugin-install.sh` was considered and rejected, since that script's entire job *is* running arbitrary admin-trusted code as root — scoping sudo to it scopes nothing. Polls `GET /plugins/`, compares versions against what's installed locally (any difference, not just "catalogue is newer", triggers a reinstall — so a rollback still converges), downloads+installs new/changed plugins one at a time via `plugin-install.sh`, and skips the entire run if `/tmp/classpad_activity` is non-empty (a plugin install does `rm -rf` on the target directory first, which would delete files out from under a process actually running from it). **No signalling to the launcher when a plugin lands** — Phase 9's `run_poller()` already calls `scan_plugins()` fresh every 30s, so a newly-installed plugin shows up in the button grid on its own; confirmed end-to-end on real hardware with zero IPC between the two processes. Don't add a signalling mechanism later; the decoupling is intentional, not a gap.
+
 For website buttons:
 ```json
 {
@@ -235,7 +239,9 @@ classpad/
 │   ├── openbox/
 │   │   └── autostart          # Starts bar.py then launcher service
 │   ├── systemd/
-│   │   └── classpad-launcher.service
+│   │   ├── classpad-launcher.service           # user-level (classpad), the kiosk itself
+│   │   ├── classpad-plugin-deploy.service       # system-level (root) — Phase 10
+│   │   └── classpad-plugin-deploy.timer         # OnUnitActiveSec=5min
 │   ├── xbindkeys/
 │   │   └── xbindkeysrc        # Ctrl+Alt+Shift+Escape recovery combo
 │   └── chromium/
@@ -245,10 +251,12 @@ classpad/
 ├── scripts/
 │   ├── install.sh             # First-time machine setup
 │   ├── plugin-install.sh      # Install/update a plugin from server
+│   ├── plugin_deploy.py       # Phase 10 — polls /plugins/, installs new/changed ones, root-only
 │   └── recovery.sh            # Called by xbindkeys to kill child processes
 └── tests/                     # pytest unit tests (run via python3-pytest, apt-installed)
     ├── test_plugin_manager.py
     ├── test_plugin_install.py
+    ├── test_plugin_deploy.py
     ├── test_process_manager.py
     ├── test_recovery.py
     ├── test_config.py         # Button grid layout math + Phase 9 server polling

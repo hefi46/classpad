@@ -176,11 +176,36 @@ session (different dev machines per the client/server split — see CLAUDE.md
 
 ## Phase 10: Plugin Deployment from Server
 
-- [ ] Create a background daemon or cron job on the client that polls `GET /plugins/` periodically
-- [ ] Compares installed plugin versions against catalogue
-- [ ] Downloads and installs any new or updated plugins via `plugin-install.sh`
-- [ ] Updates the launcher button grid after new plugins are installed
-- [ ] Test: upload a new plugin zip to the server, verify it appears on the client within the poll interval
+Deliberately **not** built into the Phase 9 launcher poller thread, despite
+both being "periodic polls against the server." Plugin `install.sh` scripts
+run with elevated privileges by design (CLAUDE.md's Plugin System trust
+model) — installing plugins has to be root, but the launcher itself runs as
+the unprivileged `classpad` kiosk user and should stay that way. Considered
+(and rejected) giving `classpad` narrow `NOPASSWD` sudo for just
+`plugin-install.sh`: that scopes nothing, since that script's entire job is
+running arbitrary admin-trusted code as root. Built instead as a separate
+system-level (`/etc/systemd/system/`, not the user-level unit dir) systemd
+timer + oneshot service, root-owned, wired up by `install.sh` (new step
+`[6/11]`, all steps renumbered).
+
+Deliberately has **no signalling** to the launcher process when a new plugin
+lands. Phase 9's `run_poller()` already calls `scan_plugins()` fresh on every
+`/config` poll (30s), so a newly-installed plugin appears in the button grid
+on its own next poll — confirmed end-to-end on real hardware (below) with
+zero IPC between the two processes. Don't add a signalling mechanism later;
+it isn't needed and the decoupling is intentional.
+
+Deliberately does **not** remove locally-installed plugins that disappear
+from the catalogue — out of stated scope.
+
+- [x] Create a background daemon or cron job on the client that polls `GET /plugins/` periodically — `scripts/plugin_deploy.py`, run every 5 minutes by `system/systemd/classpad-plugin-deploy.timer` (`OnBootSec=1min`, `OnUnitActiveSec=5min`) via `classpad-plugin-deploy.service` (`Type=oneshot`). Reuses `launcher.config.get_server_url()` for the same `CLASSPAD_SERVER_URL`-env-var-then-`/opt/classpad/server_url`-file convention as Phase 9 — no separate config source.
+- [x] Compares installed plugin versions against catalogue — `needs_install()` parses `major.minor.patch` into an int tuple and treats **any** difference (not just "catalogue is newer") as needing install, so a rollback to an older catalogue version still converges, not just picking up new ones. A malformed local manifest version is treated as "needs reinstall" rather than crashing the run.
+- [x] Downloads and installs any new or updated plugins via `plugin-install.sh` — downloads to a `tempfile.TemporaryDirectory()`, one plugin at a time, each wrapped in its own `try`/`except` so one broken plugin doesn't block the rest of the catalogue. Skips the **entire** run if `/tmp/classpad_activity` is non-empty (something's currently running) rather than installing anyway — `plugin-install.sh` does `rm -rf` on a plugin's install directory before re-copying, which would delete files out from under a live process if that plugin happened to be the one running; cheap check, reuses state the launcher already maintains, next timer tick retries.
+- [x] Updates the launcher button grid after new plugins are installed — no explicit step needed; see the decoupling note above. Verified end-to-end on real hardware (below).
+- [x] Test: upload a new plugin zip to the server, verify it appears on the client within the poll interval — see the GATE below (via a stub server rather than the real Flask server, same reasoning as Phase 9).
+- [x] **Real bug found and fixed on real hardware (2026-07-31), in `plugin-install.sh` (Phase 3), not new to Phase 10**: `mktemp -d` creates the staging dir at `0700`, and `cp -a "$PLUGIN_ROOT/." "$TARGET_DIR/"` was found to propagate that `0700` mode onto `$TARGET_DIR` itself (confirmed by direct `stat` before/after, and by isolating the exact line via `bash -x`) — despite the "copy contents via `src/.`" idiom, `cp -a`'s attribute-preservation applies to the destination directory too. Never caught before because every previous invocation of this script was same-user (installer == reader); Phase 10 is the first caller to actually install as root and read as `classpad`, which is exactly when it surfaced: `xylotest` installed successfully but was unreadable (`Permission denied`) by the `classpad` user and invisible to `plugin_manager.scan_plugins()`. Fixed with `chmod -R a+rX "$TARGET_DIR"` after the copy (read+execute only, not write — installed plugin content is meant to be read-only once deployed). Re-verified on real hardware: `755 root:root`, readable recursively as `classpad`, and the plugin launches correctly.
+- [x] `tests/test_plugin_deploy.py`, 19 cases — `parse_version`/`needs_install`/`is_safe_to_install` in isolation, `main()`'s orchestration (skips when unconfigured/unreachable/unsafe, installs only new-or-changed ids, one failure doesn't block the rest, **running twice against an unchanged catalogue installs nothing** — the specific check for a version-compare bug that would silently `rm -rf` and reinstall every plugin on every timer tick), and `fetch_catalogue`/`download_plugin_zip` against a real local stub server (mirroring `server/routes/plugins.py`'s exact wire format, including a real `404` raising `HTTPError` rather than writing an HTML error page out as a `.zip`).
+- [x] **GATE — RUN, real hardware, 2026-07-31:** built a real test plugin (`xylotest`, a copy of the actual `plugins/xylophone/` content under a different id — not a synthetic fixture) and a stub server extending Phase 9's with `/plugins/` and `/plugins/<id>/download`. Fresh install: not-in-catalogue → appears once added, `plugin_manager.scan_plugins()` picks it up, `classpad` can read every file recursively (post-permission-fix). Convergence: running the real systemd service repeatedly against an *unchanged* catalogue (with the test zip's manifest version actually matching the catalogue's claimed version — an earlier mismatched-test-rig run had appeared to "reinstall every time," which was traced to my own test zip being stale, not a real bug, see above) installs nothing on the 2nd/3rd runs, confirmed via a marker file surviving. Version bump: catalogue version changed → reinstalled (marker gone). Race guard: `/tmp/classpad_activity` set to a fake value while the real launcher was stopped → whole cycle skipped, nothing touched. Full decoupled loop: with `xylotest` installed by the root timer and enabled in a `/config` response, the *already-running*, previously-untouched Phase 9 launcher process picked it up and rendered it on its own next poll — clicked it, launched correctly, activity label showed "Xylotest," Home returned cleanly. Systemd wiring itself verified via `systemctl daemon-reload` + `enable --now` + `systemctl status` (correct 5-minute-out next-trigger time) + a manual `systemctl start` of the oneshot service (real `journalctl` output, `status=0/SUCCESS`). All test state (stub server, `xylotest`, `server_url`, `config_cache.json`, the two systemd units) cleaned up afterward, machine left at the same baseline as after the Phase 9 gate.
 
 ---
 

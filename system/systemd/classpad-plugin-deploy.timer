@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically run Classpad Plugin Deployment
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+Unit=classpad-plugin-deploy.service
+
+[Install]
+WantedBy=timers.target

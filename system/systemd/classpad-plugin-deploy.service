@@ -1,0 +1,7 @@
+[Unit]
+Description=Classpad Plugin Deployment (Phase 10)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/classpad
+ExecStart=/usr/bin/python3 /opt/classpad/scripts/plugin_deploy.py

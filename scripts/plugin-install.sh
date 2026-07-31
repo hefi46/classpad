@@ -77,6 +77,14 @@ mkdir -p "$PLUGINS_DIR"
 rm -rf "$TARGET_DIR"
 mkdir -p "$TARGET_DIR"
 cp -a "$PLUGIN_ROOT/." "$TARGET_DIR/"
+# `mktemp -d` creates $STAGING_DIR at 0700, and `cp -a` (via "src/." even
+# with an existing destination) propagates that mode onto $TARGET_DIR itself
+# — found running this as root for Phase 10 (the plugin-deploy timer), which
+# is the first caller to actually install as a different user than the one
+# reading it (classpad). Any invocation of this script hits the same bug,
+# not just the automated one; a-only, not write, since a plugin's installed
+# files are meant to be read-only content once deployed.
+chmod -R a+rX "$TARGET_DIR"
 
 INSTALL_SCRIPT="$TARGET_DIR/install.sh"
 if [ -f "$INSTALL_SCRIPT" ]; then

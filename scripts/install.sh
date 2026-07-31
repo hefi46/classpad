@@ -19,7 +19,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="/opt/classpad"
 KIOSK_USER="classpad"
 
-echo "== [1/10] Installing apt dependencies =="
+echo "== [1/11] Installing apt dependencies =="
 apt-get update
 # python3-xlib is required by bar/bar.py (see requirements.txt) but was
 # missing from CLAUDE.md's original required-packages list — added here
@@ -31,7 +31,7 @@ apt-get install -y \
     chromium git curl rsync xbindkeys x11-utils xdotool \
     alsa-utils network-manager
 
-echo "== [2/10] Creating $KIOSK_USER user =="
+echo "== [2/11] Creating $KIOSK_USER user =="
 if ! id -u "$KIOSK_USER" >/dev/null 2>&1; then
     # Groups mirror what `adduser` grants a normal Debian desktop user by
     # default (checked against the dev account on this same image) — audio
@@ -40,7 +40,7 @@ if ! id -u "$KIOSK_USER" >/dev/null 2>&1; then
     useradd --create-home --shell /bin/bash --groups audio,video,plugdev "$KIOSK_USER"
 fi
 
-echo "== [3/10] Deploying repo to $DEPLOY_DIR =="
+echo "== [3/11] Deploying repo to $DEPLOY_DIR =="
 mkdir -p "$DEPLOY_DIR"
 # machine_id/server_url/config_cache.json are runtime-generated, not part of
 # the repo — --delete would wipe them on every re-run otherwise (machine_id
@@ -55,12 +55,12 @@ rsync -a --delete \
     "$REPO_DIR"/ "$DEPLOY_DIR"/
 chown -R "$KIOSK_USER":"$KIOSK_USER" "$DEPLOY_DIR"
 
-echo "== [4/10] Installing Chromium managed policy =="
+echo "== [4/11] Installing Chromium managed policy =="
 mkdir -p /etc/chromium/policies/managed
 cp "$DEPLOY_DIR/system/chromium/policies/managed/classpad-policy.json" \
     /etc/chromium/policies/managed/classpad-policy.json
 
-echo "== [5/10] Installing systemd user unit and openbox autostart =="
+echo "== [5/11] Installing systemd user unit and openbox autostart =="
 mkdir -p /etc/systemd/user
 cp "$DEPLOY_DIR/system/systemd/classpad-launcher.service" \
     /etc/systemd/user/classpad-launcher.service
@@ -70,12 +70,25 @@ install -o "$KIOSK_USER" -g "$KIOSK_USER" -m 755 \
     "$DEPLOY_DIR/system/openbox/autostart" \
     "/home/$KIOSK_USER/.config/openbox/autostart"
 
-echo "== [6/10] Setting default volume =="
+echo "== [6/11] Installing plugin deployment timer (Phase 10) =="
+# System-level (/etc/systemd/system/), not the user-level unit dir above —
+# runs as root deliberately: plugin install.sh scripts are expected to run
+# with elevated privileges (see CLAUDE.md's Plugin System trust model), so
+# this stays a separate, root-owned background job rather than living
+# inside the unprivileged, always-on classpad-launcher.service.
+cp "$DEPLOY_DIR/system/systemd/classpad-plugin-deploy.service" \
+    /etc/systemd/system/classpad-plugin-deploy.service
+cp "$DEPLOY_DIR/system/systemd/classpad-plugin-deploy.timer" \
+    /etc/systemd/system/classpad-plugin-deploy.timer
+systemctl daemon-reload
+systemctl enable --now classpad-plugin-deploy.timer
+
+echo "== [7/11] Setting default volume =="
 # Boots muted at 0% on this hardware with no visible error (found on real
 # hardware, see CLAUDE.md) — 70% matches the bar's default slider position.
 amixer sset Master 70% unmute >/dev/null
 
-echo "== [7/10] Setting hostname from serial number =="
+echo "== [8/11] Setting hostname from serial number =="
 SERIAL="$(dmidecode -s system-serial-number 2>/dev/null | tr -d '[:space:]')"
 if [ -z "$SERIAL" ] || [ "$SERIAL" = "None" ]; then
     echo "install.sh: WARNING dmidecode returned no usable serial number; leaving hostname and machine_id untouched" >&2
@@ -96,7 +109,7 @@ else
     chown "$KIOSK_USER":"$KIOSK_USER" "$DEPLOY_DIR/machine_id"
 fi
 
-echo "== [8/10] WiFi (WPA2-Enterprise PEAP/MSCHAPv2) =="
+echo "== [9/11] WiFi (WPA2-Enterprise PEAP/MSCHAPv2) =="
 if [ -n "${CLASSPAD_WIFI_SSID:-}" ]; then
     : "${CLASSPAD_WIFI_IDENTITY:?CLASSPAD_WIFI_IDENTITY must be set alongside CLASSPAD_WIFI_SSID}"
     : "${CLASSPAD_WIFI_PASSWORD:?CLASSPAD_WIFI_PASSWORD must be set alongside CLASSPAD_WIFI_SSID}"
@@ -126,7 +139,7 @@ else
     echo "install.sh: CLASSPAD_WIFI_SSID not set, skipping WiFi profile creation" >&2
 fi
 
-echo "== [9/10] Server URL (Phase 9 polling) =="
+echo "== [10/11] Server URL (Phase 9 polling) =="
 if [ -n "${CLASSPAD_SERVER_URL:-}" ]; then
     # Written once here rather than baked into the tracked systemd unit file
     # (which would force this script to template a repo file) — same
@@ -139,7 +152,7 @@ else
     echo "install.sh: WARNING CLASSPAD_SERVER_URL not set — server polling (Phase 9) stays disabled; the launcher runs on locally-installed plugins only until this is configured." >&2
 fi
 
-echo "== [10/10] Enabling autologin =="
+echo "== [11/11] Enabling autologin =="
 mkdir -p /etc/lightdm/lightdm.conf.d
 cp "$DEPLOY_DIR/system/lightdm/lightdm.conf" /etc/lightdm/lightdm.conf.d/50-classpad.conf
 
