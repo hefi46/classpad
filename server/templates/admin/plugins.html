@@ -1,0 +1,71 @@
+{% extends "admin/base.html" %}
+{% block title %}Plugins — Classpad Admin{% endblock %}
+{% block content %}
+<div class="view-head">
+  <h1>Plugins</h1>
+  <p class="view-sub">{{ plugins|length }} in the catalogue — {{ enabled_count }} enabled in the shared profile</p>
+</div>
+
+<p class="profile-note">One shared profile — enabling and reordering here applies to every machine, on their next check-in.</p>
+
+<div class="roster-scroll">
+<table class="plugin-table">
+  <thead>
+    <tr>
+      <th class="sr-only">Order</th>
+      <th>Plugin</th>
+      <th>Version</th>
+      <th>Type</th>
+      <th class="sr-only">Enable</th>
+      <th class="sr-only">Reorder</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for plugin in plugins %}
+    <tr class="{{ '' if plugin.enabled else 'is-disabled' }}">
+      <td class="order-badge">{{ plugin.position + 1 if plugin.enabled else "" }}</td>
+      <td>
+        <div class="plugin-name">{{ plugin.name }}</div>
+        <div class="plugin-id">{{ plugin.id }}</div>
+        <div class="plugin-desc">{{ plugin.description }}</div>
+      </td>
+      <td class="mono">{{ plugin.version }}</td>
+      <td><span class="type-pill">{{ plugin.type }}</span></td>
+      <td>
+        <form method="post" action="{{ url_for('admin.toggle_plugin', plugin_id=plugin.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="toggle-btn">{{ "Disable" if plugin.enabled else "Enable" }}</button>
+        </form>
+      </td>
+      <td>
+        {% if plugin.enabled %}
+        <div class="reorder-btns">
+          <form method="post" action="{{ url_for('admin.move_plugin', plugin_id=plugin.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="direction" value="up">
+            <button type="submit" {{ "disabled" if plugin.position == 0 else "" }} aria-label="Move {{ plugin.name }} earlier">↑</button>
+          </form>
+          <form method="post" action="{{ url_for('admin.move_plugin', plugin_id=plugin.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="direction" value="down">
+            <button type="submit" {{ "disabled" if plugin.position == enabled_count - 1 else "" }} aria-label="Move {{ plugin.name }} later">↓</button>
+          </form>
+        </div>
+        {% endif %}
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="empty">No plugins uploaded yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+
+<h2 class="upload-heading">Upload a plugin</h2>
+<form method="post" action="{{ url_for('admin.upload_plugin') }}" enctype="multipart/form-data" class="upload-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="file" name="plugin_zip" accept=".zip" required>
+  <button type="submit" class="primary-btn">Upload</button>
+</form>
+<p class="upload-help">.zip with a manifest.json — installs to every machine once enabled above.</p>
+{% endblock %}

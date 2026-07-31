@@ -256,6 +256,64 @@ def set_profile(plugin_ids: list[str]) -> None:
     db.commit()
 
 
+def _renumber_enabled(db: sqlite3.Connection) -> None:
+    rows = db.execute(
+        "SELECT id FROM plugins WHERE enabled = 1 ORDER BY position"
+    ).fetchall()
+    for i, row in enumerate(rows):
+        db.execute("UPDATE plugins SET position = ? WHERE id = ?", (i, row["id"]))
+
+
+def toggle_plugin_enabled(plugin_id: str) -> None:
+    """Flip one plugin's membership in the shared profile.
+
+    The admin-portal profile screen is plain forms (no JS reorder widget),
+    so the profile is edited incrementally — toggle one plugin, nudge one
+    plugin up/down — rather than replaced wholesale like `set_profile`
+    (which still exists for tests/scripting).
+    """
+    db = get_db()
+    row = db.execute(
+        "SELECT enabled FROM plugins WHERE id = ?", (plugin_id,)
+    ).fetchone()
+    if row is None:
+        return
+    if row["enabled"]:
+        db.execute(
+            "UPDATE plugins SET enabled = 0, position = NULL WHERE id = ?",
+            (plugin_id,),
+        )
+        _renumber_enabled(db)
+    else:
+        count = db.execute(
+            "SELECT COUNT(*) AS c FROM plugins WHERE enabled = 1"
+        ).fetchone()["c"]
+        db.execute(
+            "UPDATE plugins SET enabled = 1, position = ? WHERE id = ?",
+            (count, plugin_id),
+        )
+    db.commit()
+
+
+def move_plugin(plugin_id: str, direction: str) -> None:
+    """Swap an enabled plugin with its neighbour. direction: 'up' or 'down'."""
+    db = get_db()
+    rows = db.execute(
+        "SELECT id FROM plugins WHERE enabled = 1 ORDER BY position"
+    ).fetchall()
+    ids = [r["id"] for r in rows]
+    if plugin_id not in ids:
+        return
+    idx = ids.index(plugin_id)
+    swap_idx = idx - 1 if direction == "up" else idx + 1
+    if swap_idx < 0 or swap_idx >= len(ids):
+        return
+    other_id = ids[swap_idx]
+    db.execute("UPDATE plugins SET position = ? WHERE id = ?", (swap_idx, plugin_id))
+    db.execute("UPDATE plugins SET position = ? WHERE id = ?", (idx, other_id))
+    db.commit()
+
+
 def list_plugins() -> list[Plugin]:
     db = get_db()
     rows = db.execute(

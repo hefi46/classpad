@@ -1,18 +1,4 @@
-import pytest
-
 from server import models
-from server.app import create_app
-
-
-@pytest.fixture
-def app(tmp_path):
-    return create_app(data_dir=tmp_path)
-
-
-@pytest.fixture
-def client(app):
-    return app.test_client()
-
 
 def test_unknown_machine_gets_empty_config(client):
     resp = client.get("/config/11e-brandnew")

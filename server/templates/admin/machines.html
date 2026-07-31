@@ -1,0 +1,52 @@
+{% extends "admin/base.html" %}
+{% block title %}Machines — Classpad Admin{% endblock %}
+{% block content %}
+<div class="view-head">
+  <h1>Machines</h1>
+  <p class="view-sub">{{ rows|length }} registered</p>
+</div>
+<div class="roster-scroll">
+<table class="roster">
+  <thead>
+    <tr>
+      <th>Machine</th>
+      <th>Status</th>
+      <th>Current activity</th>
+      <th>Last seen</th>
+      <th class="sr-only">Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for machine, status in rows %}
+    <tr>
+      <td>
+        <div class="identity">
+          <form method="post" action="{{ url_for('admin.set_display_name', machine_id=machine.id) }}" class="rename-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="text" name="display_name" value="{{ machine.display_name or '' }}" placeholder="Set a name…" class="display-name-input">
+            <button type="submit" class="link-btn">Save</button>
+          </form>
+          <span class="hostname">{{ machine.id }}</span>
+        </div>
+      </td>
+      <td><span class="status-pill status-{{ status }}">{{ status|capitalize }}</span></td>
+      <td>
+        {% if machine.current_activity %}{{ machine.current_activity }}{% else %}<span class="muted">On launcher</span>{% endif %}
+      </td>
+      <td class="mono">{{ machine.last_seen or "never" }}</td>
+      <td>
+        <form method="post" action="{{ url_for('admin.force_home', machine_id=machine.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="home-btn" {{ "disabled" if machine.force_home else "" }}>
+            {{ "Pending…" if machine.force_home else "Return to Home" }}
+          </button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="empty">No machines have checked in yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
