@@ -1,0 +1,9 @@
+{
+  "id": "libreoffice-writer",
+  "name": "Writer",
+  "version": "1.0.0",
+  "type": "app",
+  "launch_command": "/usr/bin/soffice --writer --nologo --norestore",
+  "icon": "icon.png",
+  "description": "Full word processor — test tile, not yet vetted for classroom use"
+}

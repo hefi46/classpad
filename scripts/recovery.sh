@@ -7,7 +7,8 @@ ACTIVITY_FILE="${CLASSPAD_ACTIVITY_FILE:-/tmp/classpad_activity}"
 # — trixie only ships the Qt/QML rewrite, gcompris-qt. Matched by name (no -f):
 # these are the real binary names, and -f would also catch e.g. a custom
 # plugin's argv that happens to mention one of them.
-KILL_LIST=(chromium tuxpaint tuxtype tuxmath gcompris-qt xylophone wordprocessor)
+# soffice.bin: `soffice` is a wrapper script that execs this; comm is the real binary.
+KILL_LIST=(chromium tuxpaint tuxtype tuxmath gcompris-qt xylophone wordprocessor cheese abiword soffice.bin)
 
 # SIGKILL, not the pkill default (SIGTERM) — confirmed on real hardware that
 # TuxPaint catches SIGTERM and shows an "unsaved changes?" dialog instead of

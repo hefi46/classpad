@@ -1,0 +1,9 @@
+{
+  "id": "cheese",
+  "name": "Cheese",
+  "version": "1.0.0",
+  "type": "app",
+  "launch_command": "/usr/bin/cheese",
+  "icon": "icon.png",
+  "description": "Take photos and videos with the webcam — test tile, not yet vetted for classroom use"
+}
