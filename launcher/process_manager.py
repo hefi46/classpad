@@ -31,7 +31,6 @@ KILL_LIST = [
     "xylophone",
     "wordprocessor",
     "cheese",
-    "abiword",
     "soffice.bin",  # `soffice` is a wrapper script that execs this; comm is the real binary
 ]
 

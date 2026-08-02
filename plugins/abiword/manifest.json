@@ -1,9 +1,0 @@
-{
-  "id": "abiword",
-  "name": "AbiWord",
-  "version": "1.0.0",
-  "type": "app",
-  "launch_command": "/usr/bin/abiword",
-  "icon": "icon.png",
-  "description": "Lightweight rich-text word processor — test tile, not yet vetted for classroom use"
-}

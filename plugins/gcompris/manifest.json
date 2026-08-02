@@ -1,0 +1,9 @@
+{
+  "id": "gcompris",
+  "name": "GCompris",
+  "version": "1.0.0",
+  "type": "app",
+  "launch_command": "/usr/games/gcompris-qt --fullscreen",
+  "icon": "icon.png",
+  "description": "Educational activities for young children"
+}

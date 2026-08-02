@@ -86,26 +86,24 @@ def test_kills_wordprocessor(tmp_path):
             wordprocessor.kill()
 
 
-def test_kills_cheese_abiword_and_soffice(tmp_path):
-    # Test-tile plugins (plugins/cheese, plugins/abiword,
-    # plugins/libreoffice-writer) added to the kill list alongside the
-    # built-in apps. soffice.bin is the real binary `soffice` execs into —
-    # see the comment on KILL_LIST in this script.
+def test_kills_cheese_and_soffice(tmp_path):
+    # Test-tile plugins (plugins/cheese, plugins/libreoffice-writer) added
+    # to the kill list alongside the built-in apps. soffice.bin is the real
+    # binary `soffice` execs into — see the comment on KILL_LIST in this
+    # script.
     activity_file = tmp_path / "activity"
     activity_file.write_text("Cheese")
 
     cheese = spawn_fake(tmp_path, "cheese")
-    abiword = spawn_fake(tmp_path, "abiword")
     soffice = spawn_fake(tmp_path, "soffice.bin")
     try:
         result = run_recovery(activity_file)
 
         assert result.returncode == 0, result.stderr
         assert wait_until_dead(cheese)
-        assert wait_until_dead(abiword)
         assert wait_until_dead(soffice)
     finally:
-        for p in (cheese, abiword, soffice):
+        for p in (cheese, soffice):
             if is_alive(p):
                 p.kill()
 
