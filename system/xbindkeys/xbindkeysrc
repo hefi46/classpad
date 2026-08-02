@@ -6,5 +6,5 @@
 # used for the Phase 2 gate testing because F12 requires the Fn key on a lot
 # of laptop keyboards, which is exactly the kind of thing that trips up
 # non-technical teaching staff in an actual emergency.
-"/opt/classpad/scripts/recovery.sh"
+"/opt/classpad/scripts/recovery.sh --full"
     control+alt+shift + Escape

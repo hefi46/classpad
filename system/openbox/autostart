@@ -1,9 +1,11 @@
 #!/bin/sh
-python3 /opt/classpad/bar/bar.py &
 xbindkeys -f /opt/classpad/system/xbindkeys/xbindkeysrc &
 
-# Started here rather than `systemctl --user enable` on default.target: enabling
-# would let the unit activate before X is up, and Restart=always would then
-# crash-loop every 2s until X exists. Running it from autostart guarantees X
-# (and this session's D-Bus/systemd --user instance) is already up first.
+# Both started here rather than `systemctl --user enable` on default.target:
+# enabling would let the units activate before X is up, and Restart=always
+# would then crash-loop every 2s until X exists. Running them from autostart
+# guarantees X (and this session's D-Bus/systemd --user instance) is already
+# up first. Both being systemd units (Restart=always) is also what lets the
+# recovery hotkey force-kill and reload them, not just the child app in front.
+systemctl --user start classpad-bar.service &
 systemctl --user start classpad-launcher.service &

@@ -73,10 +73,12 @@ mkdir -p /etc/X11/xorg.conf.d
 cp "$DEPLOY_DIR/system/X11/xorg.conf.d/10-classpad-no-vtswitch.conf" \
     /etc/X11/xorg.conf.d/10-classpad-no-vtswitch.conf
 
-echo "== [6/12] Installing systemd user unit and openbox autostart =="
+echo "== [6/12] Installing systemd user units and openbox autostart =="
 mkdir -p /etc/systemd/user
 cp "$DEPLOY_DIR/system/systemd/classpad-launcher.service" \
     /etc/systemd/user/classpad-launcher.service
+cp "$DEPLOY_DIR/system/systemd/classpad-bar.service" \
+    /etc/systemd/user/classpad-bar.service
 
 # `install -d` only chowns the leaf directory it's given, not any parent
 # directories it has to create along the way — found on real hardware:

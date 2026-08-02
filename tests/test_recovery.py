@@ -43,10 +43,10 @@ def wait_until_dead(process, timeout=3):
     return False
 
 
-def run_recovery(activity_file):
+def run_recovery(activity_file, *args):
     env = dict(os.environ)
     env["CLASSPAD_ACTIVITY_FILE"] = str(activity_file)
-    return subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
+    return subprocess.run(["bash", str(SCRIPT), *args], env=env, capture_output=True, text=True)
 
 
 def test_kills_processes_in_the_kill_list(tmp_path):
@@ -166,3 +166,63 @@ def test_creates_activity_file_if_missing(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert activity_file.read_text() == ""
+
+
+def _stub_systemctl(tmp_path):
+    # No real classpad-bar/launcher systemd units exist on a dev/CI host, so
+    # this stubs `systemctl` on PATH and asserts recovery.sh invokes it (or
+    # doesn't) with the right args, rather than asserting the (untestable
+    # here) real restart. Real restart behavior — Restart=always bringing
+    # each unit back up after this kill — is a systemd guarantee, not this
+    # script's to verify.
+    calls_file = tmp_path / "systemctl_calls"
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    stub_systemctl = stub_dir / "systemctl"
+    stub_systemctl.write_text(
+        f'#!/bin/bash\necho "$@" >> "{calls_file}"\n'
+    )
+    stub_systemctl.chmod(0o755)
+    return calls_file, stub_dir
+
+
+def test_full_mode_force_kills_bar_and_launcher_units(tmp_path):
+    calls_file, stub_dir = _stub_systemctl(tmp_path)
+
+    activity_file = tmp_path / "activity"
+    activity_file.write_text("")
+
+    env = dict(os.environ)
+    env["CLASSPAD_ACTIVITY_FILE"] = str(activity_file)
+    env["PATH"] = f"{stub_dir}:{env['PATH']}"
+    result = subprocess.run(["bash", str(SCRIPT), "--full"], env=env, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    assert calls_file.exists()
+    calls = calls_file.read_text()
+    assert "--user" in calls
+    assert "kill" in calls
+    assert "--signal=SIGKILL" in calls
+    assert "classpad-bar.service" in calls
+    assert "classpad-launcher.service" in calls
+
+
+def test_default_mode_does_not_touch_bar_and_launcher_units(tmp_path):
+    # Regression test: bar.py's Home button calls recovery.sh with no args
+    # for the routine "go home" path (see _on_home_clicked) — it must not
+    # also SIGKILL the bar/launcher units, or every Home click visibly
+    # restarts the bar. Found on real hardware 2026-08-02: before the
+    # --full split, Home reused the same script the emergency hotkey used
+    # and did exactly this.
+    calls_file, stub_dir = _stub_systemctl(tmp_path)
+
+    activity_file = tmp_path / "activity"
+    activity_file.write_text("")
+
+    env = dict(os.environ)
+    env["CLASSPAD_ACTIVITY_FILE"] = str(activity_file)
+    env["PATH"] = f"{stub_dir}:{env['PATH']}"
+    result = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    assert not calls_file.exists()

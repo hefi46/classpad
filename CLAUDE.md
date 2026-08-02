@@ -15,6 +15,7 @@ A central server (Docker, local network) manages app configuration and deploymen
 ### Persistent Bar
 - Built with **PyGTK** (python3-gi / GObject Introspection)
 - Runs as a separate process, started before the launcher
+- **Runs as a systemd `--user` unit (`classpad-bar.service`), `Restart=always`, added 2026-08-02** — previously just backgrounded (`bar.py &`) from `system/openbox/autostart` with nothing to bring it back if it crashed or wedged. Started from autostart via `systemctl --user start`, same as the launcher and for the same reason (see Pygame Launcher below): enabling it on `default.target` directly would let it race X coming up and crash-loop. Being a proper unit is what lets the recovery hotkey target it (see Staff Recovery below).
 - Uses EWMH strut hints (`_NET_WM_STRUT_PARTIAL`) to reserve screen space at the top, and `_NET_WM_STATE_ABOVE` to stay on top
 - Height: 55px at top of screen
 - Contains: Home button, current activity label, volume control, clock
@@ -124,11 +125,15 @@ For website buttons:
 - **Machines have an admin-set friendly `display_name`, separate from their hostname.** The hostname (`11e-<serialnumber>`, see Network & Deployment Context) stays the machine's real identity server-side — free, unique, needs no coordination at image time — but isn't something a teacher should have to read off a screen. `display_name` (e.g. `blue-3`) is optional, admin-editable in the portal, shown in place of the hostname there, and meant to match a physical sticker on the machine. The client never sees or sends its own `display_name`.
 
 ### Staff Recovery / Recovery Model
-Two-layer recovery system:
-1. **xbindkeys** daemon running at X session level — listens for `Ctrl+Alt+Shift+Escape` regardless of which app is in front. When triggered, kills all known child processes by name and the systemd service auto-restarts the launcher.
-2. **Admin portal** "Return to Home" button per machine — sets a flag in config response, machine detects it on next poll and clears all child processes.
+`recovery.sh` has two modes, since it now has two different callers with different needs (split 2026-08-02 — see below):
+- **Default (no args):** kills all known child processes by name only. This is what `bar.py`'s Home button shells out to (`_on_home_clicked`) for the routine "go home" path — killing the tracked child is enough to unblock the launcher's `wait_for_exit()` and send it home, and a normal Home click has no reason to touch the bar or launcher that's handling the click.
+- **`--full`:** does the same child-process kill, then also force-kills the bar and launcher themselves (`systemctl --user kill --signal=SIGKILL classpad-bar.service classpad-launcher.service`, added 2026-08-02) so both come back fresh via their own `Restart=always`. Uses `systemctl kill`, not `stop`/`restart`, so it doesn't wait on the normal stop lifecycle's timeout — same reasoning as the SIGKILL-not-SIGTERM choice below, this is the emergency path and can't depend on a graceful shutdown. Only the xbindkeys emergency hotkey passes `--full` (`system/xbindkeys/xbindkeysrc` invokes `recovery.sh --full`) — **bug found and fixed on real hardware (2026-08-02):** before this split, Home reused the same script the hotkey used, so every routine Home click also SIGKILLed and visibly restarted the bar; the split was needed the moment the bar/launcher force-kill was added, not just for the emergency path.
 
-This hotkey is the actual safety net for a child stuck in a fullscreen app (the bar itself is covered in that case — see Persistent Bar above). **Verified on real 11e hardware:** the Phase 2 gate (2026-07-30) confirmed the underlying mechanism — a generic modifier+key xbindkeys binding (tested as `Ctrl+Shift+F12`), both via synthetic (`xdotool key`) and a real physical keypress, fires correctly through GCompris-qt and TuxMath while each is genuinely fullscreen and focused, since neither establishes a blocking active keyboard grab. The final combo was changed in Phase 6 (2026-07-30) from an F-key to `Ctrl+Alt+Shift+Escape` — F12 requires the Fn key on a lot of laptop keyboards, which is exactly the kind of thing that trips up non-technical teaching staff in an actual emergency — and re-verified on real hardware against TuxMath fullscreen with the real `recovery.sh` wired up. Both TuxPaint/TuxMath-style apps also have a clean exit path reachable by the target age group (Escape repeatedly, or an on-screen X/close affordance), so the hotkey is an emergency fallback, not the routine way out.
+Two-layer recovery system:
+1. **xbindkeys** daemon running at X session level — listens for `Ctrl+Alt+Shift+Escape` regardless of which app is in front, runs `recovery.sh --full` (see above).
+2. **Admin portal** "Return to Home" button per machine — sets a flag in config response, machine detects it on next poll and clears all child processes via `process_manager.kill_all()` directly (not `recovery.sh` — see "Process kill list" under Pygame Launcher above for why the two kill lists must be kept in sync by hand). (This path does not reload the bar/launcher — it's a routine "go home" signal handled cooperatively by the running launcher process, not an emergency force-kill.)
+
+This hotkey is the actual safety net for a child stuck in a fullscreen app (the bar itself is covered in that case — see Persistent Bar above), and now also the recovery path if the bar or launcher process itself gets wedged (e.g. the stuck-pointer-grab class of bug, see App Launching below) rather than just a child app. **Verified on real 11e hardware:** the Phase 2 gate (2026-07-30) confirmed the underlying mechanism — a generic modifier+key xbindkeys binding (tested as `Ctrl+Shift+F12`), both via synthetic (`xdotool key`) and a real physical keypress, fires correctly through GCompris-qt and TuxMath while each is genuinely fullscreen and focused, since neither establishes a blocking active keyboard grab. The final combo was changed in Phase 6 (2026-07-30) from an F-key to `Ctrl+Alt+Shift+Escape` — F12 requires the Fn key on a lot of laptop keyboards, which is exactly the kind of thing that trips up non-technical teaching staff in an actual emergency — and re-verified on real hardware against TuxMath fullscreen with the real `recovery.sh` wired up. Both TuxPaint/TuxMath-style apps also have a clean exit path reachable by the target age group (Escape repeatedly, or an on-screen X/close affordance), so the hotkey is an emergency fallback, not the routine way out.
 
 Note `recovery.sh` sends `SIGKILL` (`pkill -9`), not the default `SIGTERM` — confirmed on real hardware that TuxPaint catches `SIGTERM` and shows an "unsaved changes?" save dialog instead of exiting. An emergency recovery path can't depend on the stuck app cooperating with a graceful shutdown.
 
@@ -239,8 +244,9 @@ classpad/
 │   ├── lightdm/
 │   │   └── lightdm.conf
 │   ├── openbox/
-│   │   └── autostart          # Starts bar.py then launcher service
+│   │   └── autostart          # Starts bar.service then launcher.service
 │   ├── systemd/
+│   │   ├── classpad-bar.service                 # user-level (classpad), Restart=always — added 2026-08-02
 │   │   ├── classpad-launcher.service           # user-level (classpad), the kiosk itself
 │   │   ├── classpad-plugin-deploy.service       # system-level (root) — Phase 10
 │   │   └── classpad-plugin-deploy.timer         # OnUnitActiveSec=5min

@@ -1,0 +1,14 @@
+[Unit]
+Description=Classpad Persistent Bar
+After=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/classpad
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/python3 /opt/classpad/bar/bar.py
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
