@@ -653,7 +653,7 @@ def main():
     window_height = screen_height - BAR_HEIGHT
 
     screen = pygame.display.set_mode((screen_width, window_height), pygame.NOFRAME)
-    pygame.display.set_caption("Word Processor")
+    pygame.display.set_caption("My Story Writer")
     pygame.key.set_repeat(400, 40)
     pygame.key.start_text_input()
 

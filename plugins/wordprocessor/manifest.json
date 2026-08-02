@@ -1,6 +1,6 @@
 {
   "id": "wordprocessor",
-  "name": "Word Processor",
+  "name": "My Story Writer",
   "version": "1.0.0",
   "type": "custom",
   "launch_command": "/usr/bin/python3 /opt/classpad/plugins/wordprocessor/app/wordprocessor.py",
