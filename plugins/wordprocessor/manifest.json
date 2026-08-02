@@ -1,0 +1,9 @@
+{
+  "id": "wordprocessor",
+  "name": "Word Processor",
+  "version": "1.0.0",
+  "type": "custom",
+  "launch_command": "/usr/bin/python3 /opt/classpad/plugins/wordprocessor/app/wordprocessor.py",
+  "icon": "icon.png",
+  "description": "Write a story with big letters"
+}

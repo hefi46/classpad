@@ -224,13 +224,28 @@ from the catalogue — out of stated scope.
 
 ## Phase 12: Custom Apps — Word Processor
 
-- [ ] Create `plugins/wordprocessor/app/` — simple fullscreen HTML5 app (served locally via a tiny Python HTTP server bundled in the plugin)
-- [ ] Large font, minimal toolbar (bold, font size)
-- [ ] "Send to Teacher" button: POSTs content to central server, server emails via SMTP relay to configured teacher address
-- [ ] Name picker on open: child selects their name from a large-button list (names configured per-machine in admin portal)
-- [ ] Child name included in email subject line
-- [ ] "Clear" button to start fresh
-- [ ] Test email delivery via school SMTP relay
+Rebuilt mid-build, 2026-08-02: the original plan below (HTML5 app served by a
+local Python HTTP server, opened in Chromium) was scrapped after a first
+attempt — too much of the build effort went into "Send to Teacher"/email and
+the per-machine name picker before the core editor itself worked. Redirected
+to a **Pygame app** (matching `plugins/xylophone/app/xylophone.py`'s
+windowed-below-the-bar pattern instead of a browser), with the feature scope
+narrowed to what a v1 word processor actually needs: write, save, reopen.
+"Send to Teacher" and the name picker are deferred to a later polish phase,
+not dropped — see the original items below, kept for that phase.
+
+- [x] Create `plugins/wordprocessor/app/wordprocessor.py` (+ `text_editor.py`, `documents.py`) — Pygame app, windowed below the bar like xylophone, not the originally-planned HTML5/Chromium approach.
+- [x] Large font (4 presets, `A-`/`A+` toolbar control), word-wrapped multi-line text editing with keyboard + mouse-click cursor positioning. **Bold dropped from scope** — raw Pygame has no rich-text rendering primitive, and it wasn't worth the complexity for a toolbar nicety; can revisit in the polish phase if wanted.
+- [x] Document list screen: "+ New Story", open, delete (with a confirm dialog) — the actual "main focus" this build was redirected toward, per explicit user feedback mid-session ("too much work is going into send to teacher and picking a name... it should mainly focus on saving documents somewhere and easily being able to open them up").
+- [x] **Autosave, not a Save button** — debounced ~1.5s after the last keystroke, with a 5s hard-cap flush during continuous typing. Required, not optional: the recovery hotkey and the bar's Home button both send `SIGKILL` (see Staff Recovery below), so there's no exit hook available to save on the way out, and a "save before you leave?" prompt would reintroduce exactly the blocking-dialog pattern the SIGKILL choice was made to avoid. Verified on real hardware: typed continuously, `pkill -9 wordprocessor` mid-burst, confirmed the on-disk `.txt` held everything up to the 5s hard-cap flush, not the whole in-progress sentence but not nothing either.
+- [x] Documents stored at `/opt/classpad/documents/wordprocessor/` (one plain `.txt` file per story, atomic writes via `os.replace`) — deliberately *outside* `plugins/wordprocessor/`, because `scripts/plugin-install.sh` does `rm -rf` on a plugin's own install directory on every update (see Plugin System below); anything saved inside the plugin's own tree would be destroyed the next time it's redeployed. `scripts/install.sh`'s rsync step needed a matching `--exclude='documents'` for the same reason at the repo-checkout level — verified on real hardware that re-running the install rsync (dry-run) no longer touches saved stories.
+- [x] `wordprocessor` renamed via `prctl(PR_SET_NAME)` (same fix xylophone needed first) and added to both `process_manager.KILL_LIST` and `recovery.sh`'s kill list — verified on real hardware that `ps`/`pkill` see `comm=wordprocessor`, not `python3`, and that a real `pkill -9 wordprocessor` (what the recovery hotkey and bar's Home button both do) kills it cleanly.
+- [x] **Bug found and fixed on real hardware (2026-08-02):** the document list's "last edited" label showed a stale-looking date (e.g. "Aug 2") for a document saved seconds earlier, instead of a time. Root cause: `friendly_mtime()` was comparing the document's real mtime against `pygame.time.get_ticks()` (milliseconds since the process started, not a date) instead of wall-clock time, so the "is this today" check always failed. Fixed by comparing against `datetime.datetime.now()` directly.
+- [ ] "Send to Teacher" button — **deferred to the polish phase**, not built. POSTs content to central server, server emails via SMTP relay to configured teacher address. Server-side work (endpoint, SMTP, admin-portal config) to be driven from the WSL2/server dev host per the client/server split in Development Environment above; needs the retention/consent decisions in `pre-build-decisions.md` §11 closed first (see below).
+- [ ] Name picker on open: child selects their name from a large-button list (names configured per-machine in admin portal) — **deferred to the polish phase**, not built. Explicitly de-scoped this session: "no name is fine."
+- [ ] Child name included in email subject line — depends on the name picker above.
+- [ ] Test email delivery via school SMTP relay — depends on "Send to Teacher" above.
+- [ ] Retention policy for saved documents — `/opt/classpad/documents/wordprocessor/` gives stories a durable, plugin-update-safe home, but does **not** resolve wipe-on-reboot vs. sync-to-server vs. keep-indefinitely (`pre-build-decisions.md` §11, `TODO.md`'s Deferred section below) — still an open privacy/safeguarding decision, not silently closed by this build.
 
 ---
 

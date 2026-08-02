@@ -22,7 +22,7 @@ CHROMIUM_BASE_FLAGS = [
 # Corrected from "gcompris" — trixie only ships the Qt/QML rewrite, gcompris-qt.
 # Matched against `comm` (no -f): these are the real binary names, and -f would
 # also catch e.g. a custom plugin's argv that happens to mention one of them.
-KILL_LIST = ["chromium", "tuxpaint", "tuxtype", "tuxmath", "gcompris-qt", "xylophone"]
+KILL_LIST = ["chromium", "tuxpaint", "tuxtype", "tuxmath", "gcompris-qt", "xylophone", "wordprocessor"]
 
 _current_process = None
 _current_chromium_profile_dir = None

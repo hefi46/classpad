@@ -47,11 +47,16 @@ mkdir -p "$DEPLOY_DIR"
 # gets rewritten in step 7 and server_url in step 9 anyway if their env vars
 # are set, but config_cache.json has no such regeneration step, and any of
 # the three set via an env var not present on a given re-run would otherwise
-# just vanish, contradicting this script's "safe to re-run" claim).
+# just vanish, contradicting this script's "safe to re-run" claim). documents/
+# is the same shape of problem at a much larger blast radius: it holds
+# children's saved word processor stories (plugins/wordprocessor/app/documents.py),
+# lives outside the repo entirely, and --delete would wipe every saved story
+# on the next re-run without this exclude.
 rsync -a --delete \
     --exclude='.git' --exclude='.claude' \
     --exclude='tests' --exclude='__pycache__' --exclude='*.pyc' \
     --exclude='machine_id' --exclude='server_url' --exclude='config_cache.json' \
+    --exclude='documents' \
     "$REPO_DIR"/ "$DEPLOY_DIR"/
 chown -R "$KIOSK_USER":"$KIOSK_USER" "$DEPLOY_DIR"
 

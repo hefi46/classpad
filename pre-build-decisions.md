@@ -151,6 +151,7 @@
 - [x] Child's name on email — picked from a per-machine list (TODO Phase 12)
 - [x] Does the teacher reply — out of scope for v1 (consistent with this checklist's own suggestion; no reply flow anywhere in TODO)
 - [ ] Email content retention — stored on server or send-and-forget? Not addressed — same gap as artwork retention above
+- **Note (2026-08-02):** the word processor rebuild (TODO Phase 12) gave saved stories a durable on-disk home (`/opt/classpad/documents/wordprocessor/`, plain `.txt` per story). That's a storage *mechanism* only — it does not answer any of the retention/consent flags above (wipe on reboot? sync to server? parental consent for "Send to Teacher"?), which are still open and still need a decision before that feature is built.
 
 ---
 

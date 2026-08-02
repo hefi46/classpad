@@ -67,6 +67,25 @@ def test_kills_processes_in_the_kill_list(tmp_path):
                 p.kill()
 
 
+def test_kills_wordprocessor(tmp_path):
+    # wordprocessor.py renames itself via prctl(PR_SET_NAME) specifically so
+    # it gets its own kill-list entry instead of the generic "python3" name
+    # it would otherwise share with the launcher and bar — see CLAUDE.md's
+    # Process kill list section (same fix xylophone needed first).
+    activity_file = tmp_path / "activity"
+    activity_file.write_text("Word Processor")
+
+    wordprocessor = spawn_fake(tmp_path, "wordprocessor")
+    try:
+        result = run_recovery(activity_file)
+
+        assert result.returncode == 0, result.stderr
+        assert wait_until_dead(wordprocessor)
+    finally:
+        if is_alive(wordprocessor):
+            wordprocessor.kill()
+
+
 def test_kills_a_process_that_ignores_sigterm(tmp_path):
     activity_file = tmp_path / "activity"
     activity_file.write_text("TuxPaint")
