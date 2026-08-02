@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import math
 import subprocess
 import sys
 import time
@@ -28,8 +29,11 @@ ACTIVITY_FILE = "/tmp/classpad_activity"
 RECOVERY_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "recovery.sh"
 VOLUME_STEP = 5
 WIFI_POLL_INTERVAL_MS = 5000
+BATTERY_POLL_INTERVAL_MS = 30000  # sysfs reads are cheap, but a laptop's
+# charge level doesn't move fast enough to need wifi's 5s cadence
 INFO_POLL_INTERVAL_MS = 2000
 NMCLI_TIMEOUT_SECONDS = 3
+POWER_SUPPLY_DIR = Path("/sys/class/power_supply")
 
 # Hand-drawn (Cairo) rather than Unicode glyphs or a bundled icon theme —
 # "⌂" for Home was found on real hardware to be barely visible at normal text
@@ -53,10 +57,30 @@ BAR_BUTTON_CSS = b".classpad-bar-btn { padding: 3px; }"
 # glancing at the bar actually needs; SSID/IP move to the hover tooltip
 # (unchanged, see _tick_wifi).
 WIFI_BAR_GLYPHS = ["▁", "▃", "▅", "▇"]  # ▁ ▃ ▅ ▇
-WIFI_COLOR_GOOD = "#2e7d32"
-WIFI_COLOR_FAIR = "#f9a825"
-WIFI_COLOR_WEAK = "#c62828"
+# One flat color for every lit bar regardless of signal level — the
+# per-tier green/amber/red coloring this replaced was read by a teacher as
+# a health/warning signal ("red = something's wrong"), when it was only ever
+# meant to reflect an ordinary weak-but-fine connection. Bar *count* still
+# reflects signal strength; only the color no longer does.
+WIFI_COLOR_ACTIVE = "#1565c0"
 WIFI_COLOR_INACTIVE = "#9e9e9e"
+WIFI_COLOR_DISCONNECTED = "#c62828"
+
+# RGB tuples (0-1 floats), not hex strings like the WIFI_COLOR_* above —
+# these feed cairo's set_source_rgb directly (the battery indicator is a
+# hand-drawn icon, matching draw_home_icon/draw_speaker_icon below, not
+# Pango markup like the wifi text glyphs).
+BATTERY_COLOR_GOOD = (0.18, 0.49, 0.20)  # #2e7d32
+BATTERY_COLOR_FAIR = (0.98, 0.66, 0.15)  # #f9a825
+BATTERY_COLOR_LOW = (0.78, 0.16, 0.16)  # #c62828
+
+BATTERY_ICON_WIDTH = 30
+BATTERY_ICON_HEIGHT = 16
+BATTERY_NUB_WIDTH = 3
+BATTERY_NUB_HEIGHT = 8
+BATTERY_CORNER_RADIUS = 2
+BATTERY_FILL_PADDING = 2.5
+ZAP_COLOR = (1.0, 1.0, 1.0)
 
 
 def set_strut_partial(xid, screen_width, height):
@@ -148,24 +172,128 @@ def get_wifi_status():
 
 def wifi_indicator_markup(status):
     """Pango markup for the bar's compact top-right icon: signal strength as
-    four ascending bars (colored by tier), not the SSID text — kept pure and
-    GTK-free so the tiering logic is directly unit-testable. The SSID/IP
-    detail stays in the hover tooltip (see _tick_wifi), unchanged.
+    four ascending bars, lit bar count reflecting level but all lit bars a
+    single flat color (see WIFI_COLOR_ACTIVE) rather than colored by tier —
+    kept pure and GTK-free so this logic is directly unit-testable. The
+    SSID/IP detail stays in the hover tooltip (see _tick_wifi), unchanged.
     """
     if not status["connected"]:
-        return f'<span foreground="{WIFI_COLOR_WEAK}">✕</span>'
+        return f'<span foreground="{WIFI_COLOR_DISCONNECTED}">✕</span>'
 
     signal = status.get("signal")
     if signal is None:
         return f'<span foreground="{WIFI_COLOR_INACTIVE}">?</span>'
 
     level = 0 if signal <= 0 else min(4, -(-signal // 25))  # ceil-div, capped at 4
-    color = WIFI_COLOR_GOOD if signal >= 50 else WIFI_COLOR_FAIR if signal >= 25 else WIFI_COLOR_WEAK
 
     return "".join(
-        f'<span foreground="{color if i < level else WIFI_COLOR_INACTIVE}">{glyph}</span>'
+        f'<span foreground="{WIFI_COLOR_ACTIVE if i < level else WIFI_COLOR_INACTIVE}">{glyph}</span>'
         for i, glyph in enumerate(WIFI_BAR_GLYPHS)
     )
+
+
+def resolve_wifi_status(previous, current):
+    """Smooths over a real, observed nmcli race rather than a hypothetical
+    one: get_wifi_status makes its "is a wifi device connected" and "which
+    network is active" checks as two separate nmcli calls a few hundred ms
+    apart. During a brief roam/reassociation blip on an AP network with
+    multiple access points sharing one SSID (confirmed present on this
+    network via `nmcli dev wifi` showing the same SSID at several signal
+    levels), the device can still read "connected" while the second call
+    briefly finds no line marked active — connected=True but signal=None
+    for exactly one poll, even though the network never actually dropped.
+    Rather than flash the bar to "?" for that one 5s tick, carry forward the
+    previous poll's signal/SSID until either a real reading or a genuine
+    disconnect comes in. Pure and GTK-free, same reasoning as
+    get_wifi_status/wifi_indicator_markup.
+    """
+    if not current["connected"]:
+        return current
+    if current["signal"] is not None:
+        return current
+    if previous["connected"] and previous["signal"] is not None:
+        return {
+            "connected": True,
+            "ssid": previous["ssid"],
+            "ip": current["ip"] or previous["ip"],
+            "signal": previous["signal"],
+        }
+    return current
+
+
+def _read_ac_online():
+    """Whether any Mains-type power supply (the AC adapter) reports
+    `online`. Found on real hardware (this ThinkPad, plugged in at 99%):
+    BAT*/status reads "Not charging" rather than "Charging" once the
+    battery is near-full — a charge-threshold behavior, not a fault — so
+    keying the zap overlay off BAT*/status alone misses "plugged in" for
+    exactly the case a teacher would check it. Returns None (not False) if
+    no Mains-type entry is found at all, so the caller can fall back to the
+    status-field check rather than silently reporting "not plugged in" on
+    hardware that just names the adapter differently.
+    """
+    try:
+        entries = list(POWER_SUPPLY_DIR.iterdir())
+    except OSError:
+        return None
+
+    for entry in entries:
+        try:
+            if (entry / "type").read_text().strip() != "Mains":
+                continue
+            return (entry / "online").read_text().strip() == "1"
+        except OSError:
+            continue
+
+    return None
+
+
+def get_battery_status():
+    """Reads directly from sysfs rather than shelling out to `acpi`/`upower`
+    — neither is guaranteed installed on this image, while
+    /sys/class/power_supply/ is a stable kernel interface needing no extra
+    package. Pure and GTK-free like get_wifi_status, for the same reason:
+    directly unit-testable. Picks the first BAT* entry with readable
+    capacity/status files; a machine with no battery at all (or an
+    unreadable one) reports "not present" rather than guessing.
+
+    `charging` reflects the AC adapter's `online` state (see
+    _read_ac_online) rather than BAT*/status directly — "plugged into
+    charge" is what the zap icon promises, and status alone under-reports
+    that near-full. Falls back to status == "Charging" only if no AC
+    adapter entry exists at all.
+    """
+    try:
+        battery_dirs = sorted(p for p in POWER_SUPPLY_DIR.iterdir() if p.name.startswith("BAT"))
+    except OSError:
+        return {"present": False, "percent": None, "charging": None}
+
+    ac_online = _read_ac_online()
+
+    for battery_dir in battery_dirs:
+        try:
+            percent = int((battery_dir / "capacity").read_text().strip())
+            status = (battery_dir / "status").read_text().strip()
+        except (OSError, ValueError):
+            continue
+        charging = ac_online if ac_online is not None else status == "Charging"
+        return {"present": True, "percent": percent, "charging": charging}
+
+    return {"present": False, "percent": None, "charging": None}
+
+
+def battery_fill_color(percent):
+    """Tier color for the battery icon's fill level — pure so the tiering
+    logic is directly unit-testable, same reasoning as wifi_indicator_markup.
+    Charging state is conveyed separately by the zap overlay (see
+    draw_battery_icon), not by overriding this color, so a charging-but-low
+    battery still reads as low.
+    """
+    if percent >= 50:
+        return BATTERY_COLOR_GOOD
+    if percent >= 20:
+        return BATTERY_COLOR_FAIR
+    return BATTERY_COLOR_LOW
 
 
 def get_serial_number():
@@ -263,6 +391,82 @@ def draw_speaker_icon(cr, size, wave_count, color=ICON_COLOR):
         cr.stroke()
 
 
+def _rounded_rect_path(cr, x, y, w, h, r):
+    cr.new_path()
+    cr.arc(x + w - r, y + r, r, -math.pi / 2, 0)
+    cr.arc(x + w - r, y + h - r, r, 0, math.pi / 2)
+    cr.arc(x + r, y + h - r, r, math.pi / 2, math.pi)
+    cr.arc(x + r, y + r, r, math.pi, 3 * math.pi / 2)
+    cr.close_path()
+
+
+def draw_zap_icon(cr, cx, cy, size, color=ZAP_COLOR, outline_color=ICON_COLOR):
+    """A small lightning-bolt zigzag centered at (cx, cy) — the charging
+    overlay on the battery icon. Filled white with a thin dark outline
+    (rather than just the fill color) so it stays legible regardless of
+    what tier color the battery fill underneath happens to be.
+    """
+    points = [
+        (0.55, 0.0),
+        (0.15, 0.55),
+        (0.40, 0.55),
+        (0.28, 1.0),
+        (0.85, 0.35),
+        (0.55, 0.35),
+    ]
+    x0, y0 = cx - size / 2, cy - size / 2
+
+    cr.new_path()
+    cr.move_to(x0 + points[0][0] * size, y0 + points[0][1] * size)
+    for px, py in points[1:]:
+        cr.line_to(x0 + px * size, y0 + py * size)
+    cr.close_path()
+
+    cr.set_source_rgb(*color)
+    cr.fill_preserve()
+    cr.set_line_width(0.6)
+    cr.set_source_rgb(*outline_color)
+    cr.stroke()
+
+
+def draw_battery_icon(cr, status):
+    """Battery body + terminal nub outline (always drawn, even with no
+    battery present — an empty outline rather than nothing, so the icon
+    slot doesn't just disappear), filled left-to-right by charge percentage
+    in a tier color, with a zap overlay while charging. No percentage text
+    on the icon itself — that's surfaced via tooltip on hover instead (see
+    Bar._tick_battery), matching how the wifi indicator keeps SSID/IP out of
+    the icon and in its tooltip.
+    """
+    body_width = BATTERY_ICON_WIDTH - BATTERY_NUB_WIDTH
+    height = BATTERY_ICON_HEIGHT
+
+    cr.set_line_width(1.5)
+    cr.set_source_rgb(*ICON_COLOR)
+    _rounded_rect_path(cr, 0.75, 0.75, body_width - 1.5, height - 1.5, BATTERY_CORNER_RADIUS)
+    cr.stroke()
+
+    nub_y = (height - BATTERY_NUB_HEIGHT) / 2
+    cr.rectangle(body_width - 0.5, nub_y, BATTERY_NUB_WIDTH, BATTERY_NUB_HEIGHT)
+    cr.fill()
+
+    if not status["present"]:
+        return
+
+    percent = max(0, min(100, status["percent"]))
+    pad = BATTERY_FILL_PADDING
+    inner_width = body_width - 2 * pad
+    inner_height = height - 2 * pad
+    fill_width = inner_width * percent / 100
+
+    cr.set_source_rgb(*battery_fill_color(percent))
+    cr.rectangle(pad, pad, fill_width, inner_height)
+    cr.fill()
+
+    if status["charging"]:
+        draw_zap_icon(cr, body_width / 2, height / 2, height * 0.85)
+
+
 def make_icon_button(draw_fn, size, tooltip):
     """A borderless Gtk.Button wrapping a Gtk.DrawingArea that renders
     draw_fn(cr, size) on click. `.classpad-bar-btn` (CSS, set up by Bar)
@@ -311,6 +515,8 @@ class Bar(Gtk.Window):
 
         self._build_ui()
 
+        self._wifi_status = {"connected": False, "ssid": None, "ip": None, "signal": None}
+
         self.connect("realize", self._on_realize)
         self.connect("destroy", Gtk.main_quit)
 
@@ -318,6 +524,8 @@ class Bar(Gtk.Window):
         GLib.timeout_add(1000, self._tick_activity)
         GLib.timeout_add(WIFI_POLL_INTERVAL_MS, self._tick_wifi)
         self._tick_wifi()  # first update immediately, not 5s after startup
+        GLib.timeout_add(BATTERY_POLL_INTERVAL_MS, self._tick_battery)
+        self._tick_battery()
 
     def _on_realize(self, *_args):
         set_strut_partial(self.get_window().get_xid(), self.screen_width, BAR_HEIGHT)
@@ -349,10 +557,27 @@ class Bar(Gtk.Window):
         self.wifi_label.set_valign(Gtk.Align.CENTER)
         row.pack_end(self.wifi_label, False, False, 0)
 
+        # Packed right after wifi_label so it lands immediately to wifi's
+        # left (pack_end packs right-to-left — see note below) — next to the
+        # wifi indicator, both hugging the top-right corner. A DrawingArea,
+        # not a Gtk.Label like wifi_label — the battery indicator is a
+        # hand-drawn icon (draw_battery_icon) rather than Pango text/glyphs,
+        # to match the home/speaker icon style. Not wrapped in
+        # make_icon_button/Gtk.Button since it isn't clickable; tooltips
+        # work directly on a plain widget the same as they already do on
+        # wifi_label (also not a button).
+        self._battery_status = {"present": False, "percent": None, "charging": None}
+        self.battery_area = Gtk.DrawingArea()
+        self.battery_area.set_size_request(BATTERY_ICON_WIDTH, BATTERY_ICON_HEIGHT)
+        self.battery_area.set_valign(Gtk.Align.CENTER)
+        self.battery_area.connect("draw", self._on_battery_draw)
+        row.pack_end(self.battery_area, False, False, 0)
+
         # row.pack_end() packs right-to-left: the first call ends up
         # rightmost, and each subsequent call lands to its left — so calls
         # go here in the reverse of the desired left-to-right visual order
-        # (minus, slider, plus), with wifi_label further right still.
+        # (minus, slider, plus), with wifi_label/battery_area further right
+        # still.
         volume_up = make_icon_button(lambda cr, size: draw_speaker_icon(cr, size, 3), SPEAKER_ICON_SIZE, "Louder")
         volume_up.connect("clicked", lambda _b: self._step_volume(VOLUME_STEP))
         row.pack_end(volume_up, False, False, 0)
@@ -393,13 +618,30 @@ class Bar(Gtk.Window):
         return True
 
     def _tick_wifi(self):
-        status = get_wifi_status()
+        status = resolve_wifi_status(self._wifi_status, get_wifi_status())
+        self._wifi_status = status
         self.wifi_label.set_markup(wifi_indicator_markup(status))
         if status["connected"]:
             tooltip = f"SSID: {status['ssid'] or 'unknown'}\nIP: {status['ip'] or 'unknown'}"
         else:
             tooltip = "Not connected"
         self.wifi_label.set_tooltip_text(tooltip)
+        return True
+
+    def _on_battery_draw(self, _widget, cr):
+        draw_battery_icon(cr, self._battery_status)
+
+    def _tick_battery(self):
+        self._battery_status = get_battery_status()
+        self.battery_area.queue_draw()
+
+        status = self._battery_status
+        if status["present"]:
+            state = "Charging" if status["charging"] else "On battery"
+            tooltip = f"{state}: {status['percent']}%"
+        else:
+            tooltip = "No battery detected"
+        self.battery_area.set_tooltip_text(tooltip)
         return True
 
     def _on_home_clicked(self, _button):
