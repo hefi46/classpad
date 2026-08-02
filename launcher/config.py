@@ -10,11 +10,20 @@ import urllib.request
 from pathlib import Path
 
 from launcher import process_manager
+from launcher.button import ICON_SIZE
 from launcher.plugin_manager import scan_plugins
 
 GRID_MARGIN = 40
 TILE_PADDING = 24
 MAX_TILE_SIZE = 260
+
+# Reserved zones for the pager (launcher/pager.py) — left/right strips for the
+# prev/next arrows, a band at the bottom for the numbered page indicators.
+# Defined here (not in pager.py) because build_button_grid needs them to keep
+# the tile grid from overlapping the pager chrome; pager.py imports these back
+# for its own layout so the two stay in sync by construction, not by hand.
+ARROW_ZONE_WIDTH = 70
+PAGE_INDICATOR_HEIGHT = 60
 
 # CLASSPAD_SERVER_URL takes priority (matches the CLASSPAD_PLUGINS_DIR /
 # CLASSPAD_ACTIVITY_FILE test-override convention); the file is the real
@@ -44,35 +53,80 @@ POLLER_TICK_SECONDS = 1
 HTTP_TIMEOUT_SECONDS = 5
 
 
-def compute_grid_dimensions(count, area_width, area_height):
-    best_cols, best_rows, best_tile_size = 1, count, 0
-    for cols in range(1, count + 1):
-        rows = math.ceil(count / cols)
-        tile_size = min(area_width / cols, area_height / rows)
-        if tile_size > best_tile_size:
-            best_cols, best_rows, best_tile_size = cols, rows, tile_size
-    return best_cols, best_rows
+def _grid_area(area_width, area_height):
+    """The screen area available for tiles once the pager's arrow strips
+    (left/right) and page-indicator band (bottom) are reserved.
+    """
+    left = GRID_MARGIN + ARROW_ZONE_WIDTH
+    top = GRID_MARGIN
+    width = max(0, area_width - 2 * GRID_MARGIN - 2 * ARROW_ZONE_WIDTH)
+    height = max(0, area_height - 2 * GRID_MARGIN - PAGE_INDICATOR_HEIGHT)
+    return left, top, width, height
 
 
-def build_button_grid(plugins, area_width, area_height):
-    count = len(plugins)
-    if count == 0:
+def compute_page_grid(area_width, area_height):
+    """Pick a fixed (cols, rows, tile_size) for one page of tiles.
+
+    Derived from the screen area, not from how many plugins are installed —
+    that's what keeps tile size constant across every page (build_button_grid
+    below) instead of shrinking further every time a plugin is added, like
+    the old single-screen grid did. Starts at MAX_TILE_SIZE and only shrinks
+    (down to button.ICON_SIZE — smaller and the icon itself stops reading
+    clearly) if the screen is too small to fit even one MAX_TILE_SIZE tile
+    per row/column, so this stays sane across different 11e panel
+    resolutions rather than assuming one fixed number of tiles per page.
+    """
+    _, _, grid_width, grid_height = _grid_area(area_width, area_height)
+
+    tile_size = MAX_TILE_SIZE
+    while tile_size > ICON_SIZE:
+        cols = int(grid_width // (tile_size + TILE_PADDING))
+        rows = int(grid_height // (tile_size + TILE_PADDING))
+        if cols >= 1 and rows >= 1:
+            break
+        tile_size -= 10
+
+    cols = max(1, int(grid_width // (tile_size + TILE_PADDING)))
+    rows = max(1, int(grid_height // (tile_size + TILE_PADDING)))
+    return cols, rows, tile_size
+
+
+def tiles_per_page(area_width, area_height):
+    cols, rows, _ = compute_page_grid(area_width, area_height)
+    return cols * rows
+
+
+def page_count(num_plugins, area_width, area_height):
+    per_page = tiles_per_page(area_width, area_height)
+    if num_plugins == 0:
+        return 1
+    return math.ceil(num_plugins / per_page)
+
+
+def build_button_grid(plugins, area_width, area_height, page=0):
+    """Lay out one page's worth of tiles (button.ICON_SIZE-floored,
+    MAX_TILE_SIZE-capped, see compute_page_grid) in a fixed grid.
+
+    Only plugins[page * tiles_per_page : (page + 1) * tiles_per_page] are
+    positioned — pagination (launcher/pager.py) is what lets the rest be
+    reached, not a shrink-to-fit grid.
+    """
+    cols, rows, tile_size = compute_page_grid(area_width, area_height)
+    left, top, grid_width, grid_height = _grid_area(area_width, area_height)
+
+    per_page = cols * rows
+    page_plugins = plugins[page * per_page : (page + 1) * per_page]
+    if not page_plugins:
         return []
-
-    grid_width = area_width - 2 * GRID_MARGIN
-    grid_height = area_height - 2 * GRID_MARGIN
-
-    cols, rows = compute_grid_dimensions(count, grid_width, grid_height)
 
     cell_width = grid_width / cols
     cell_height = grid_height / rows
-    tile_size = int(min(cell_width, cell_height, MAX_TILE_SIZE + TILE_PADDING) - TILE_PADDING)
 
     layout = []
-    for index, plugin in enumerate(plugins):
+    for index, plugin in enumerate(page_plugins):
         row, col = divmod(index, cols)
-        cell_x = GRID_MARGIN + col * cell_width
-        cell_y = GRID_MARGIN + row * cell_height
+        cell_x = left + col * cell_width
+        cell_y = top + row * cell_height
         tile_x = int(cell_x + (cell_width - tile_size) / 2)
         tile_y = int(cell_y + (cell_height - tile_size) / 2)
         layout.append((plugin, (tile_x, tile_y, tile_size, tile_size)))

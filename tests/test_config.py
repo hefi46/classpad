@@ -1,13 +1,14 @@
 import http.server
 import itertools
 import json
+import math
 import queue
 import threading
 
 import pytest
 
 from launcher import button, config, process_manager
-from launcher.config import build_button_grid, compute_grid_dimensions
+from launcher.config import build_button_grid, compute_page_grid, page_count, tiles_per_page
 
 
 class DummyPlugin:
@@ -20,32 +21,50 @@ AREA_WIDTH = 1366
 AREA_HEIGHT = 713
 
 
-@pytest.mark.parametrize("count", range(1, 13))
-def test_grid_has_no_overlapping_tiles(count):
+def _as_bounds(rect):
+    x, y, w, h = rect
+    return x, y, x + w, y + h
+
+
+def _all_pages(plugins, area_width, area_height):
+    """Every (plugin, rect) across every page, in page order."""
+    per_page = tiles_per_page(area_width, area_height)
+    pages = math.ceil(len(plugins) / per_page) if plugins else 0
+    combined = []
+    for page in range(pages):
+        combined.extend(build_button_grid(plugins, area_width, area_height, page=page))
+    return combined
+
+
+@pytest.mark.parametrize("count", range(1, 25))
+def test_every_plugin_is_placed_across_all_pages(count):
     plugins = [DummyPlugin(i) for i in range(count)]
 
-    layout = build_button_grid(plugins, AREA_WIDTH, AREA_HEIGHT)
+    layout = _all_pages(plugins, AREA_WIDTH, AREA_HEIGHT)
 
     assert len(layout) == count
-
-    def as_bounds(rect):
-        x, y, w, h = rect
-        return x, y, x + w, y + h
-
-    for (plugin_a, rect_a), (plugin_b, rect_b) in itertools.combinations(layout, 2):
-        ax1, ay1, ax2, ay2 = as_bounds(rect_a)
-        bx1, by1, bx2, by2 = as_bounds(rect_b)
-        overlaps = ax1 < bx2 and bx1 < ax2 and ay1 < by2 and by1 < ay2
-        assert not overlaps, f"{plugin_a.id} and {plugin_b.id} tiles overlap"
+    assert {p.id for p, _ in layout} == {p.id for p in plugins}
 
 
-@pytest.mark.parametrize("count", range(1, 13))
+@pytest.mark.parametrize("count", range(1, 25))
+def test_no_overlapping_tiles_within_a_page(count):
+    plugins = [DummyPlugin(i) for i in range(count)]
+    per_page = tiles_per_page(AREA_WIDTH, AREA_HEIGHT)
+
+    for page in range(math.ceil(count / per_page)):
+        layout = build_button_grid(plugins, AREA_WIDTH, AREA_HEIGHT, page=page)
+        for (plugin_a, rect_a), (plugin_b, rect_b) in itertools.combinations(layout, 2):
+            ax1, ay1, ax2, ay2 = _as_bounds(rect_a)
+            bx1, by1, bx2, by2 = _as_bounds(rect_b)
+            overlaps = ax1 < bx2 and bx1 < ax2 and ay1 < by2 and by1 < ay2
+            assert not overlaps, f"{plugin_a.id} and {plugin_b.id} tiles overlap on page {page}"
+
+
+@pytest.mark.parametrize("count", range(1, 25))
 def test_all_tiles_within_area(count):
     plugins = [DummyPlugin(i) for i in range(count)]
 
-    layout = build_button_grid(plugins, AREA_WIDTH, AREA_HEIGHT)
-
-    for _, (x, y, w, h) in layout:
+    for _, (x, y, w, h) in _all_pages(plugins, AREA_WIDTH, AREA_HEIGHT):
         assert x >= 0
         assert y >= 0
         assert x + w <= AREA_WIDTH
@@ -56,25 +75,53 @@ def test_rendered_icon_meets_minimum_size():
     assert button.ICON_SIZE >= 96
 
 
-@pytest.mark.parametrize("count", range(1, 13))
+@pytest.mark.parametrize("count", range(1, 25))
 def test_tiles_fit_the_rendered_icon(count):
     plugins = [DummyPlugin(i) for i in range(count)]
 
-    layout = build_button_grid(plugins, AREA_WIDTH, AREA_HEIGHT)
-
-    for _, (_, _, w, h) in layout:
+    for _, (_, _, w, h) in _all_pages(plugins, AREA_WIDTH, AREA_HEIGHT):
         assert w >= button.ICON_SIZE
         assert h >= button.ICON_SIZE
+
+
+@pytest.mark.parametrize("count", range(1, 25))
+def test_tile_size_is_identical_across_every_page(count):
+    # The whole point of paginating instead of the old shrink-to-fit grid:
+    # tiles stay the same size regardless of which page they're on.
+    plugins = [DummyPlugin(i) for i in range(count)]
+
+    sizes = {(w, h) for _, (_, _, w, h) in _all_pages(plugins, AREA_WIDTH, AREA_HEIGHT)}
+
+    assert len(sizes) == 1
 
 
 def test_build_button_grid_empty_plugin_list():
     assert build_button_grid([], AREA_WIDTH, AREA_HEIGHT) == []
 
 
-def test_compute_grid_dimensions_covers_all_items():
-    for count in range(1, 13):
-        cols, rows = compute_grid_dimensions(count, AREA_WIDTH, AREA_HEIGHT)
-        assert cols * rows >= count
+def test_build_button_grid_page_past_the_end_is_empty():
+    plugins = [DummyPlugin(i) for i in range(3)]
+    assert build_button_grid(plugins, AREA_WIDTH, AREA_HEIGHT, page=5) == []
+
+
+def test_compute_page_grid_covers_at_least_one_tile():
+    cols, rows, tile_size = compute_page_grid(AREA_WIDTH, AREA_HEIGHT)
+    assert cols >= 1
+    assert rows >= 1
+    assert tile_size >= button.ICON_SIZE
+
+
+def test_page_count_matches_tiles_per_page():
+    per_page = tiles_per_page(AREA_WIDTH, AREA_HEIGHT)
+    assert page_count(0, AREA_WIDTH, AREA_HEIGHT) == 1
+    assert page_count(per_page, AREA_WIDTH, AREA_HEIGHT) == 1
+    assert page_count(per_page + 1, AREA_WIDTH, AREA_HEIGHT) == 2
+
+
+def test_page_count_never_leaves_plugins_unreachable():
+    per_page = tiles_per_page(AREA_WIDTH, AREA_HEIGHT)
+    for count in range(0, 25):
+        assert page_count(count, AREA_WIDTH, AREA_HEIGHT) * per_page >= count
 
 
 # --- Phase 9: server polling ------------------------------------------------

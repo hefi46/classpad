@@ -28,6 +28,7 @@ A central server (Docker, local network) manages app configuration and deploymen
 - **Pygame** fullscreen window occupying the non-bar area
 - Reads installed plugins from `/opt/classpad/plugins/` and renders a button grid
 - Buttons have: large icon, label, and a type (`app`, `website`, or `custom`)
+- **Paginated grid, not shrink-to-fit (redesigned 2026-08-02).** `launcher/config.py`'s `compute_page_grid()` derives a fixed `(cols, rows, tile_size)` from the screen area alone (capped at `MAX_TILE_SIZE`, floored at `button.ICON_SIZE`) — tile size is constant on every page regardless of plugin count, so installing more plugins adds pages instead of shrinking every tile on the home screen. `launcher/pager.py`'s `Pager` renders left/right arrow buttons (disabled/greyed at the first/last page) and numbered "1 2 3" page indicators, iPad-home-screen style. `main.py` keeps the full plugin list around and rebuilds the current page's buttons on pager clicks and on poller-driven config updates (which also clamps the current page if the new list is shorter, so it can't end up pointing at a page that no longer exists).
 - On button click: launches the target as a subprocess, then waits for it to exit
 - Polls the central server for config updates on a configurable interval
 - Falls back to locally cached config if server is unreachable
@@ -193,6 +194,7 @@ classpad/
 │   ├── main.py
 │   ├── config.py              # Config loading and server polling
 │   ├── button.py              # Button rendering
+│   ├── pager.py                # Left/right page arrows + "1 2 3" indicators
 │   ├── plugin_manager.py      # Reads installed plugins, builds button grid
 │   ├── process_manager.py     # Subprocess launching and monitoring
 │   └── assets/

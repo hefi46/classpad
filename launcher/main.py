@@ -7,7 +7,8 @@ import pygame
 
 from launcher import process_manager
 from launcher.button import Button
-from launcher.config import build_button_grid, run_poller
+from launcher.config import build_button_grid, page_count, run_poller
+from launcher.pager import Pager
 from launcher.plugin_manager import scan_plugins
 
 BAR_HEIGHT = 55  # must match bar/bar.py
@@ -38,7 +39,13 @@ def main():
     click_sound = pygame.mixer.Sound(str(CLICK_SOUND_PATH))
 
     plugins = scan_plugins()
-    buttons = [Button(plugin, rect) for plugin, rect in build_button_grid(plugins, screen_width, window_height)]
+    pager = Pager()
+    pager.set_page_count(page_count(len(plugins), screen_width, window_height))
+    pager.layout(screen_width, window_height)
+    buttons = [
+        Button(plugin, rect)
+        for plugin, rect in build_button_grid(plugins, screen_width, window_height, page=pager.page)
+    ]
 
     # run_poller() blocks on network I/O and would stall this render loop if
     # called directly — it also has to keep running while wait_for_exit()
@@ -65,6 +72,14 @@ def main():
                 for button in buttons:
                     button.set_hovered(button.contains(event.pos))
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                if pager.handle_click(event.pos):
+                    buttons = [
+                        Button(plugin, rect)
+                        for plugin, rect in build_button_grid(
+                            plugins, screen_width, window_height, page=pager.page
+                        )
+                    ]
+                    continue
                 for button in buttons:
                     if button.contains(event.pos):
                         click_sound.play()
@@ -84,13 +99,18 @@ def main():
         except queue.Empty:
             pass
         else:
+            plugins = new_plugins
+            pager.set_page_count(page_count(len(plugins), screen_width, window_height))
+            pager.layout(screen_width, window_height)
             buttons = [
-                Button(plugin, rect) for plugin, rect in build_button_grid(new_plugins, screen_width, window_height)
+                Button(plugin, rect)
+                for plugin, rect in build_button_grid(plugins, screen_width, window_height, page=pager.page)
             ]
 
         screen.fill(BACKGROUND_COLOR)
         for button in buttons:
             button.draw(screen)
+        pager.draw(screen)
         pygame.display.flip()
         clock.tick(FPS)
 
