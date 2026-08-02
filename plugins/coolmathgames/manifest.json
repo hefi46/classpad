@@ -1,0 +1,9 @@
+{
+  "id": "coolmathgames",
+  "name": "Cool Math Games",
+  "version": "1.0.0",
+  "type": "website",
+  "url": "https://www.coolmathgames.com/",
+  "icon": "icon.png",
+  "description": "Math games and puzzles website"
+}

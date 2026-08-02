@@ -1,9 +1,0 @@
-{
-  "id": "reading-eggs",
-  "name": "Reading Eggs",
-  "version": "1.0.0",
-  "type": "website",
-  "url": "https://app.readingeggs.com/login/",
-  "icon": "icon.png",
-  "description": "Real-site performance test candidate — not yet a curated/approved site, see pre-build-decisions.md §3"
-}

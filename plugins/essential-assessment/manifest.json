@@ -1,9 +1,0 @@
-{
-  "id": "essential-assessment",
-  "name": "Essential Assessment",
-  "version": "1.0.0",
-  "type": "website",
-  "url": "https://app.essentialassessment.com.au/student/",
-  "icon": "icon.png",
-  "description": "Real-site performance test candidate — not yet a curated/approved site, see pre-build-decisions.md §3"
-}

@@ -228,7 +228,7 @@ classpad/
 │   │   ├── manifest.json
 │   │   └── icon.png
 │   ├── tuxmath/
-│   ├── website-placeholder/   # Example website-type button — url is a placeholder, not a real curated site
+│   ├── coolmathgames/          # Website-type button — https://www.coolmathgames.com/
 │   │   ├── manifest.json
 │   │   └── icon.png
 │   ├── gcompris/
