@@ -11,7 +11,8 @@ from Xlib.display import Display
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-from gi.repository import Gdk, GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+import cairo  # noqa: E402 — needed for the hand-drawn icon buttons below
 
 # Reuses launcher/config.py's server-URL/status conventions rather than
 # duplicating them — bar.py and the launcher are separate processes, so this
@@ -29,6 +30,22 @@ VOLUME_STEP = 5
 WIFI_POLL_INTERVAL_MS = 5000
 INFO_POLL_INTERVAL_MS = 2000
 NMCLI_TIMEOUT_SECONDS = 3
+
+# Hand-drawn (Cairo) rather than Unicode glyphs or a bundled icon theme —
+# "⌂" for Home was found on real hardware to be barely visible at normal text
+# size, and there's no dependency-free speaker glyph at all: the obvious
+# Unicode candidates (🔈/🔉/🔊, U+1F508-U+1F50A) are emoji-range codepoints
+# DejaVu Sans (this image's only installed font, confirmed elsewhere in this
+# file) doesn't cover — same tofu-box problem the "⌂ not 🏠" comment below
+# already ran into once. Drawing simple flat vector shapes directly with
+# Cairo sidesteps font coverage entirely, matching how launcher/button.py's
+# draw_plus_icon/draw_trash_icon/draw_back_arrow_icon already hand-draw
+# icons with Pygame primitives for the same reason.
+HOME_ICON_SIZE = 34
+SPEAKER_ICON_SIZE = 24
+ICON_COLOR = (0.20, 0.20, 0.20)
+CLOCK_CSS = b".classpad-clock { font-size: 20px; font-weight: bold; }"
+BAR_BUTTON_CSS = b".classpad-bar-btn { padding: 3px; }"
 
 # Ascending-height bar glyphs for the compact signal-strength indicator —
 # four bars rather than the previous "<dot> SSID" text, since the SSID
@@ -192,6 +209,90 @@ def read_server_status():
         return "grey", "Waiting for first check"
 
 
+def draw_home_icon(cr, size, color=ICON_COLOR):
+    """A simple filled house silhouette: a triangular roof over a square
+    body, centered in a size x size box.
+    """
+    cr.set_source_rgb(*color)
+    margin = size * 0.10
+    roof_y = size * 0.42
+
+    cr.move_to(size / 2, margin)
+    cr.line_to(margin, roof_y)
+    cr.line_to(size - margin, roof_y)
+    cr.close_path()
+    cr.fill()
+
+    body_left = size * 0.22
+    body_right = size * 0.78
+    # Slight overlap with the roof (roof_y - 1px-equivalent) so there's no
+    # visible seam between the two filled shapes at this resolution.
+    cr.rectangle(body_left, roof_y - size * 0.02, body_right - body_left, size - margin - roof_y + size * 0.02)
+    cr.fill()
+
+
+def draw_speaker_icon(cr, size, wave_count, color=ICON_COLOR):
+    """A speaker body (box + flared cone) plus `wave_count` sound-wave arcs
+    to its right — 1 arc for the "quieter" (-) button, 3 for "louder" (+),
+    the classic speaker-with-sound-waves volume icon.
+    """
+    cr.set_source_rgb(*color)
+
+    box_left = size * 0.06
+    cone_start = size * 0.38
+    cone_end = size * 0.56
+    top, bottom = size * 0.30, size * 0.70
+
+    cr.rectangle(box_left, top, cone_start - box_left, bottom - top)
+    cr.fill()
+
+    cr.move_to(cone_start, top)
+    cr.line_to(cone_end, size * 0.12)
+    cr.line_to(cone_end, size * 0.88)
+    cr.line_to(cone_start, bottom)
+    cr.close_path()
+    cr.fill()
+
+    cr.set_line_width(size * 0.09)
+    cr.set_line_cap(cairo.LINE_CAP_ROUND)
+    cx, cy = cone_end - size * 0.04, size / 2
+    for i in range(wave_count):
+        radius = size * 0.14 + i * size * 0.15
+        cr.new_path()
+        cr.arc(cx, cy, radius, -0.6, 0.6)
+        cr.stroke()
+
+
+def make_icon_button(draw_fn, size, tooltip):
+    """A borderless Gtk.Button wrapping a Gtk.DrawingArea that renders
+    draw_fn(cr, size) on click. `.classpad-bar-btn` (CSS, set up by Bar)
+    trims the stock GTK theme's button padding, which otherwise dwarfs an
+    icon this size on a 55px-tall bar.
+    """
+    button = Gtk.Button()
+    button.set_tooltip_text(tooltip)
+    button.set_relief(Gtk.ReliefStyle.NONE)
+    button.get_style_context().add_class("classpad-bar-btn")
+    button.set_valign(Gtk.Align.CENTER)
+
+    # Gtk.Box's cross-axis (vertical, in this horizontal row) allocation
+    # defaults to stretching a packed child to the box's full height — found
+    # on real hardware that this DrawingArea was getting stretched to the
+    # bar's full 55px, but draw_fn(cr, size) still only draws within the
+    # requested size x size (34 or 24) at the top-left of that taller cairo
+    # surface, so the icon rendered high and off-center instead of centered
+    # in the bar. Pinning both align properties to CENTER keeps the
+    # DrawingArea at its natural size regardless of the row's height.
+    area = Gtk.DrawingArea()
+    area.set_size_request(size, size)
+    area.set_halign(Gtk.Align.CENTER)
+    area.set_valign(Gtk.Align.CENTER)
+    area.connect("draw", lambda _widget, cr: draw_fn(cr, size))
+    button.add(area)
+
+    return button
+
+
 class Bar(Gtk.Window):
     def __init__(self):
         super().__init__(type=Gtk.WindowType.TOPLEVEL)
@@ -222,6 +323,12 @@ class Bar(Gtk.Window):
         set_strut_partial(self.get_window().get_xid(), self.screen_width, BAR_HEIGHT)
 
     def _build_ui(self):
+        css = Gtk.CssProvider()
+        css.load_from_data(BAR_BUTTON_CSS + b"\n" + CLOCK_CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
         overlay = Gtk.Overlay()
         self.add(overlay)
 
@@ -230,26 +337,23 @@ class Bar(Gtk.Window):
         row.set_margin_end(10)
         overlay.add(row)
 
-        # "⌂" (U+2302) rather than a house emoji: confirmed rendering cleanly
-        # in DejaVu Sans (this image's default font, no emoji font present),
-        # while 🏠 shows as a tofu box — same dependency-free Unicode-glyph
-        # approach as the info/refresh/close buttons, no icon-theme lookup.
-        home_button = Gtk.Button(label="⌂")
-        home_button.set_tooltip_text("Home")
+        home_button = make_icon_button(draw_home_icon, HOME_ICON_SIZE, "Home")
         home_button.connect("clicked", self._on_home_clicked)
         row.pack_start(home_button, False, False, 0)
 
         self.activity_label = Gtk.Label(label="")
+        self.activity_label.set_valign(Gtk.Align.CENTER)
         row.pack_start(self.activity_label, False, False, 0)
 
         self.wifi_label = Gtk.Label(label="")
+        self.wifi_label.set_valign(Gtk.Align.CENTER)
         row.pack_end(self.wifi_label, False, False, 0)
 
         # row.pack_end() packs right-to-left: the first call ends up
         # rightmost, and each subsequent call lands to its left — so calls
         # go here in the reverse of the desired left-to-right visual order
         # (minus, slider, plus), with wifi_label further right still.
-        volume_up = Gtk.Button(label="+")
+        volume_up = make_icon_button(lambda cr, size: draw_speaker_icon(cr, size, 3), SPEAKER_ICON_SIZE, "Louder")
         volume_up.connect("clicked", lambda _b: self._step_volume(VOLUME_STEP))
         row.pack_end(volume_up, False, False, 0)
 
@@ -257,22 +361,26 @@ class Bar(Gtk.Window):
         volume_scale = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=self.volume_adjustment)
         volume_scale.set_size_request(120, -1)
         volume_scale.set_draw_value(False)
+        volume_scale.set_valign(Gtk.Align.CENTER)
         volume_scale.connect("value-changed", self._on_volume_changed)
         row.pack_end(volume_scale, False, False, 0)
 
-        volume_down = Gtk.Button(label="−")  # minus sign
+        volume_down = make_icon_button(lambda cr, size: draw_speaker_icon(cr, size, 1), SPEAKER_ICON_SIZE, "Quieter")
         volume_down.connect("clicked", lambda _b: self._step_volume(-VOLUME_STEP))
         row.pack_end(volume_down, False, False, 0)
 
         self.clock_label = Gtk.Label(label="")
+        self.clock_label.get_style_context().add_class("classpad-clock")
         self.clock_label.set_halign(Gtk.Align.CENTER)
         self.clock_label.set_valign(Gtk.Align.CENTER)
         overlay.add_overlay(self.clock_label)
 
     def _tick_clock(self):
         # %-I (no leading zero) is a glibc/GNU extension — fine here since
-        # this project only ever targets Debian.
-        self.clock_label.set_text(time.strftime("%-I:%M:%S %p"))
+        # this project only ever targets Debian. No seconds (just "7:57 PM")
+        # — a live ticking seconds counter isn't information a classroom
+        # wall clock needs, and this bar isn't a stopwatch.
+        self.clock_label.set_text(time.strftime("%-I:%M %p"))
         return True
 
     def _tick_activity(self):
