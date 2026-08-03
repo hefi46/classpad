@@ -8,7 +8,51 @@ def test_unknown_machine_gets_empty_config(client):
         "display_name": None,
         "plugins": [],
         "force_home": False,
+        "background": {"color": "#add8f0", "image_version": None},
     }
+
+
+def test_background_color_surfaces_in_config(app, client):
+    with app.app_context():
+        models.set_background_color("#123456")
+
+    data = client.get("/config/11e-abc123").get_json()
+    assert data["background"] == {"color": "#123456", "image_version": None}
+
+
+def test_background_is_shared_across_machines(app, client):
+    with app.app_context():
+        models.set_background_color("#123456")
+
+    data_a = client.get("/config/11e-aaa111").get_json()
+    data_b = client.get("/config/11e-bbb222").get_json()
+    assert data_a["background"] == data_b["background"] == {
+        "color": "#123456",
+        "image_version": None,
+    }
+
+
+def test_background_image_filename_surfaces_as_image_version(app, client):
+    with app.app_context():
+        models.set_background_image("background-abc123.png")
+
+    data = client.get("/config/11e-abc123").get_json()
+    assert data["background"]["image_version"] == "background-abc123.png"
+
+
+def test_background_image_download_serves_uploaded_bytes(app, client):
+    with app.app_context():
+        (models.background_dir() / "background-abc123.png").write_bytes(b"fake-png-bytes")
+        models.set_background_image("background-abc123.png")
+
+    resp = client.get("/background/image")
+    assert resp.status_code == 200
+    assert resp.data == b"fake-png-bytes"
+
+
+def test_background_image_download_404_when_unset(client):
+    resp = client.get("/background/image")
+    assert resp.status_code == 404
 
 
 def test_config_returns_profile_plugins_in_order(app, client):

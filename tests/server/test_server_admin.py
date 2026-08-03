@@ -198,3 +198,160 @@ def test_upload_rejects_non_zip_file(app, client):
         content_type="multipart/form-data",
     )
     assert resp.status_code == 302
+
+
+def test_create_website_plugin_builds_a_valid_zip(app, client):
+    csrf = _login(client)
+    resp = client.post(
+        "/admin/plugins/create-website",
+        data={
+            "csrf_token": csrf,
+            "name": "Cool Math Games",
+            "url": "https://www.coolmathgames.com/",
+            "icon": (BytesIO(b"fake-icon-bytes"), "icon.png"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 302
+    with app.app_context():
+        plugin = models.get_plugin("cool-math-games")
+        assert plugin is not None
+        assert plugin.type == "website"
+        assert plugin.enabled is False  # no enable_now checkbox ticked
+        zip_path = models.plugins_dir() / "cool-math-games.zip"
+    with zipfile.ZipFile(zip_path) as zf:
+        manifest = json.loads(zf.read("manifest.json"))
+        assert manifest["url"] == "https://www.coolmathgames.com/"
+        assert zf.read("icon.png") == b"fake-icon-bytes"
+
+
+def test_create_website_plugin_enable_now_adds_it_to_the_profile(app, client):
+    csrf = _login(client)
+    client.post(
+        "/admin/plugins/create-website",
+        data={
+            "csrf_token": csrf,
+            "name": "Cool Math Games",
+            "url": "https://www.coolmathgames.com/",
+            "icon": (BytesIO(b"fake-icon-bytes"), "icon.png"),
+            "enable_now": "on",
+        },
+        content_type="multipart/form-data",
+    )
+    with app.app_context():
+        plugin = models.get_plugin("cool-math-games")
+    assert plugin.enabled is True
+    assert plugin.position == 0
+
+
+def test_create_website_plugin_dedupes_id_on_name_collision(app, client):
+    csrf = _login(client)
+    for _ in range(2):
+        client.post(
+            "/admin/plugins/create-website",
+            data={
+                "csrf_token": csrf,
+                "name": "Cool Math Games",
+                "url": "https://www.coolmathgames.com/",
+                "icon": (BytesIO(b"fake-icon-bytes"), "icon.png"),
+            },
+            content_type="multipart/form-data",
+        )
+    with app.app_context():
+        ids = {p.id for p in models.list_plugins()}
+    assert ids == {"cool-math-games", "cool-math-games-2"}
+
+
+def test_create_website_plugin_rejects_bad_url(app, client):
+    csrf = _login(client)
+    client.post(
+        "/admin/plugins/create-website",
+        data={
+            "csrf_token": csrf,
+            "name": "Sketchy",
+            "url": "javascript:alert(1)",
+            "icon": (BytesIO(b"fake-icon-bytes"), "icon.png"),
+        },
+        content_type="multipart/form-data",
+    )
+    with app.app_context():
+        assert models.list_plugins() == []
+
+
+def test_create_website_plugin_requires_icon(app, client):
+    csrf = _login(client)
+    client.post(
+        "/admin/plugins/create-website",
+        data={"csrf_token": csrf, "name": "Cool Math Games", "url": "https://example.com/"},
+        content_type="multipart/form-data",
+    )
+    with app.app_context():
+        assert models.list_plugins() == []
+
+
+def test_set_background_color(app, client):
+    csrf = _login(client)
+    client.post("/admin/background/color", data={"csrf_token": csrf, "color": "#123456"})
+    with app.app_context():
+        assert models.get_settings()["background_color"] == "#123456"
+
+
+def test_set_background_color_rejects_invalid_hex(app, client):
+    csrf = _login(client)
+    client.post("/admin/background/color", data={"csrf_token": csrf, "color": "not-a-color"})
+    with app.app_context():
+        assert models.get_settings()["background_color"] == "#add8f0"  # unchanged default
+
+
+def test_upload_background_image_stores_file_and_updates_settings(app, client):
+    csrf = _login(client)
+    resp = client.post(
+        "/admin/background/image",
+        data={"csrf_token": csrf, "background_image": (BytesIO(b"fake-bg-bytes"), "bg.png")},
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 302
+    with app.app_context():
+        filename = models.get_settings()["background_image_filename"]
+        assert filename is not None
+        assert (models.background_dir() / filename).read_bytes() == b"fake-bg-bytes"
+
+
+def test_upload_background_image_replaces_and_removes_old_file(app, client):
+    csrf = _login(client)
+    client.post(
+        "/admin/background/image",
+        data={"csrf_token": csrf, "background_image": (BytesIO(b"first"), "bg1.png")},
+        content_type="multipart/form-data",
+    )
+    with app.app_context():
+        first_filename = models.get_settings()["background_image_filename"]
+        first_path = models.background_dir() / first_filename
+
+    client.post(
+        "/admin/background/image",
+        data={"csrf_token": csrf, "background_image": (BytesIO(b"second"), "bg2.png")},
+        content_type="multipart/form-data",
+    )
+    with app.app_context():
+        second_filename = models.get_settings()["background_image_filename"]
+    assert second_filename != first_filename
+    assert not first_path.exists()
+
+
+def test_clear_background_image_falls_back_to_no_image(app, client):
+    csrf = _login(client)
+    client.post(
+        "/admin/background/image",
+        data={"csrf_token": csrf, "background_image": (BytesIO(b"first"), "bg1.png")},
+        content_type="multipart/form-data",
+    )
+    with app.app_context():
+        filename = models.get_settings()["background_image_filename"]
+        path = models.background_dir() / filename
+
+    client.post("/admin/background/image/clear", data={"csrf_token": csrf})
+
+    with app.app_context():
+        assert models.get_settings()["background_image_filename"] is None
+    assert not path.exists()

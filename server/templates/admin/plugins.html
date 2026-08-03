@@ -1,71 +1,126 @@
 {% extends "admin/base.html" %}
-{% block title %}Plugins — Classpad Admin{% endblock %}
+{% block title %}Config — Classpad Admin{% endblock %}
 {% block content %}
 <div class="view-head">
-  <h1>Plugins</h1>
+  <h1>Config</h1>
+  <p class="view-sub">Launcher appearance and the shared app profile — one setting for every machine, applied on their next check-in.</p>
+</div>
+
+<section class="config-section">
+  <h2 class="section-heading">Create a website tile</h2>
+  <p class="section-sub">Type a URL, add an icon, and it becomes a tile that opens in Chromium — the same as Cool Math Games.</p>
+  <form method="post" action="{{ url_for('admin.create_website_plugin') }}" enctype="multipart/form-data" class="website-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Name
+      <input type="text" name="name" required placeholder="Cool Math Games">
+    </label>
+    <label>URL
+      <input type="url" name="url" required placeholder="https://www.coolmathgames.com/">
+    </label>
+    <label>Icon
+      <input type="file" name="icon" accept="image/png,image/jpeg" required>
+    </label>
+    <label class="checkbox-label">
+      <input type="checkbox" name="enable_now"> Add to the launcher immediately
+    </label>
+    <button type="submit" class="primary-btn">Create tile</button>
+  </form>
+</section>
+
+<section class="config-section">
+  <h2 class="section-heading">Plugins</h2>
   <p class="view-sub">{{ plugins|length }} in the catalogue — {{ enabled_count }} enabled in the shared profile</p>
-</div>
 
-<p class="profile-note">One shared profile — enabling and reordering here applies to every machine, on their next check-in.</p>
-
-<div class="roster-scroll">
-<table class="plugin-table">
-  <thead>
-    <tr>
-      <th class="sr-only">Order</th>
-      <th>Plugin</th>
-      <th>Version</th>
-      <th>Type</th>
-      <th class="sr-only">Enable</th>
-      <th class="sr-only">Reorder</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for plugin in plugins %}
-    <tr class="{{ '' if plugin.enabled else 'is-disabled' }}">
-      <td class="order-badge">{{ plugin.position + 1 if plugin.enabled else "" }}</td>
-      <td>
-        <div class="plugin-name">{{ plugin.name }}</div>
-        <div class="plugin-id">{{ plugin.id }}</div>
-        <div class="plugin-desc">{{ plugin.description }}</div>
-      </td>
-      <td class="mono">{{ plugin.version }}</td>
-      <td><span class="type-pill">{{ plugin.type }}</span></td>
-      <td>
-        <form method="post" action="{{ url_for('admin.toggle_plugin', plugin_id=plugin.id) }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <button type="submit" class="toggle-btn">{{ "Disable" if plugin.enabled else "Enable" }}</button>
-        </form>
-      </td>
-      <td>
-        {% if plugin.enabled %}
-        <div class="reorder-btns">
-          <form method="post" action="{{ url_for('admin.move_plugin', plugin_id=plugin.id) }}">
+  <div class="roster-scroll">
+  <table class="plugin-table">
+    <thead>
+      <tr>
+        <th class="sr-only">Order</th>
+        <th>Plugin</th>
+        <th>Version</th>
+        <th>Type</th>
+        <th class="sr-only">Enable</th>
+        <th class="sr-only">Reorder</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for plugin in plugins %}
+      <tr class="{{ '' if plugin.enabled else 'is-disabled' }}">
+        <td class="order-badge">{{ plugin.position + 1 if plugin.enabled else "" }}</td>
+        <td>
+          <div class="plugin-name">{{ plugin.name }}</div>
+          <div class="plugin-id">{{ plugin.id }}</div>
+          <div class="plugin-desc">{{ plugin.description }}</div>
+        </td>
+        <td class="mono">{{ plugin.version }}</td>
+        <td><span class="type-pill">{{ plugin.type }}</span></td>
+        <td>
+          <form method="post" action="{{ url_for('admin.toggle_plugin', plugin_id=plugin.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="direction" value="up">
-            <button type="submit" {{ "disabled" if plugin.position == 0 else "" }} aria-label="Move {{ plugin.name }} earlier">↑</button>
+            <button type="submit" class="toggle-btn">{{ "Disable" if plugin.enabled else "Enable" }}</button>
           </form>
-          <form method="post" action="{{ url_for('admin.move_plugin', plugin_id=plugin.id) }}">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="direction" value="down">
-            <button type="submit" {{ "disabled" if plugin.position == enabled_count - 1 else "" }} aria-label="Move {{ plugin.name }} later">↓</button>
-          </form>
-        </div>
-        {% endif %}
-      </td>
-    </tr>
-    {% else %}
-    <tr><td colspan="6" class="empty">No plugins uploaded yet.</td></tr>
-    {% endfor %}
-  </tbody>
-</table>
-</div>
+        </td>
+        <td>
+          {% if plugin.enabled %}
+          <div class="reorder-btns">
+            <form method="post" action="{{ url_for('admin.move_plugin', plugin_id=plugin.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="direction" value="up">
+              <button type="submit" {{ "disabled" if plugin.position == 0 else "" }} aria-label="Move {{ plugin.name }} earlier">↑</button>
+            </form>
+            <form method="post" action="{{ url_for('admin.move_plugin', plugin_id=plugin.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="direction" value="down">
+              <button type="submit" {{ "disabled" if plugin.position == enabled_count - 1 else "" }} aria-label="Move {{ plugin.name }} later">↓</button>
+            </form>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="empty">No plugins uploaded yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
 
-<h2 class="upload-heading">Upload a plugin</h2>
-<form method="post" action="{{ url_for('admin.upload_plugin') }}" enctype="multipart/form-data" class="upload-form">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <input type="file" name="plugin_zip" accept=".zip" required>
-  <button type="submit" class="primary-btn">Upload</button>
-</form>
-<p class="upload-help">.zip with a manifest.json — installs to every machine once enabled above.</p>
+  <h3 class="upload-heading">Upload a plugin</h3>
+  <form method="post" action="{{ url_for('admin.upload_plugin') }}" enctype="multipart/form-data" class="upload-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="file" name="plugin_zip" accept=".zip" required>
+    <button type="submit" class="primary-btn">Upload</button>
+  </form>
+  <p class="upload-help">.zip with a manifest.json — installs to every machine once enabled above.</p>
+</section>
+
+<section class="config-section">
+  <h2 class="section-heading">Background</h2>
+  <p class="section-sub">Home screen appearance — applies to every machine on their next check-in.</p>
+
+  <form method="post" action="{{ url_for('admin.set_background_color') }}" class="background-color-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Colour
+      <input type="color" name="color" value="{{ settings.background_color }}">
+    </label>
+    <button type="submit" class="primary-btn">Save colour</button>
+  </form>
+
+  <form method="post" action="{{ url_for('admin.upload_background_image') }}" enctype="multipart/form-data" class="background-image-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="file" name="background_image" accept="image/png,image/jpeg" required>
+    <button type="submit" class="primary-btn">Upload artwork</button>
+  </form>
+
+  {% if settings.background_image_filename %}
+  <div class="background-current">
+    <p class="upload-help">Artwork is set — it takes priority over the solid colour above.</p>
+    <form method="post" action="{{ url_for('admin.clear_background_image') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="link-btn">Remove artwork, fall back to the solid colour</button>
+    </form>
+  </div>
+  {% else %}
+  <p class="upload-help">No artwork set — the solid colour above is used.</p>
+  {% endif %}
+</section>
 {% endblock %}

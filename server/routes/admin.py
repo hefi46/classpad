@@ -19,9 +19,12 @@ same reason: it's the one place in the system a forged request could do
 real damage.
 """
 
+import json
+import re
 import secrets
 import shutil
 import tempfile
+import unicodedata
 import zipfile
 from datetime import datetime, timezone
 from functools import wraps
@@ -142,7 +145,12 @@ def plugins():
     all_plugins = models.list_plugins()
     enabled = sorted((p for p in all_plugins if p.enabled), key=lambda p: p.position)
     disabled = sorted((p for p in all_plugins if not p.enabled), key=lambda p: p.name)
-    return render_template("admin/plugins.html", plugins=enabled + disabled, enabled_count=len(enabled))
+    return render_template(
+        "admin/plugins.html",
+        plugins=enabled + disabled,
+        enabled_count=len(enabled),
+        settings=models.get_settings(),
+    )
 
 
 @bp.route("/plugins/<plugin_id>/toggle", methods=["POST"])
@@ -231,4 +239,140 @@ def upload_plugin():
         )
         flash(f"Uploaded {plugin.name} {plugin.version} — enable it below to add it to the profile.")
 
+    return redirect(url_for("admin.plugins"))
+
+
+def _slugify(name: str) -> str:
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
+    return slug or "site"
+
+
+def _unique_plugin_id(base_slug: str) -> str:
+    existing = {p.id for p in models.list_plugins()}
+    if base_slug not in existing:
+        return base_slug
+    n = 2
+    while f"{base_slug}-{n}" in existing:
+        n += 1
+    return f"{base_slug}-{n}"
+
+
+@bp.route("/plugins/create-website", methods=["POST"])
+@login_required
+def create_website_plugin():
+    """Builds a type:website plugin (manifest + zip) from a name/URL/icon
+    entered directly in the portal, instead of requiring the admin to
+    hand-assemble a zip like upload_plugin above — same install path once
+    the manifest is built, just generated here rather than uploaded.
+    """
+    _check_csrf()
+    name = request.form.get("name", "").strip()
+    url = request.form.get("url", "").strip()
+    chromium_flags = request.form.get("chromium_flags", "").strip()
+    enable_now = request.form.get("enable_now") == "on"
+    icon_file = request.files.get("icon")
+
+    if not name or not url:
+        flash("A name and URL are required to create a website tile.")
+        return redirect(url_for("admin.plugins"))
+    if not (url.startswith("http://") or url.startswith("https://")):
+        flash("URL must start with http:// or https://.")
+        return redirect(url_for("admin.plugins"))
+    if icon_file is None or icon_file.filename == "":
+        flash("Choose an icon image for the tile.")
+        return redirect(url_for("admin.plugins"))
+
+    plugin_id = _unique_plugin_id(_slugify(name))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        plugin_dir = Path(tmp) / plugin_id
+        plugin_dir.mkdir()
+        icon_file.save(plugin_dir / "icon.png")
+
+        manifest = {
+            "id": plugin_id,
+            "name": name,
+            "version": "1.0.0",
+            "type": "website",
+            "url": url,
+            "icon": "icon.png",
+            "description": f"Website: {url}",
+        }
+        if chromium_flags:
+            manifest["chromium_flags"] = chromium_flags
+        (plugin_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+
+        try:
+            plugin = load_manifest(plugin_dir)
+        except PluginValidationError as e:
+            flash(f"Could not create tile: {e}")
+            return redirect(url_for("admin.plugins"))
+
+        zip_filename = f"{plugin.id}.zip"
+        with zipfile.ZipFile(models.plugins_dir() / zip_filename, "w") as zf:
+            zf.write(plugin_dir / "manifest.json", "manifest.json")
+            zf.write(plugin_dir / "icon.png", "icon.png")
+
+        models.upsert_plugin(
+            plugin.id,
+            name=plugin.name,
+            version=plugin.version,
+            type=plugin.type,
+            description=plugin.description,
+            zip_filename=zip_filename,
+        )
+        if enable_now:
+            models.toggle_plugin_enabled(plugin.id)
+
+    suffix = " and enabled it." if enable_now else " — enable it above to add it to the profile."
+    flash(f"Created website tile '{name}'{suffix}")
+    return redirect(url_for("admin.plugins"))
+
+
+@bp.route("/background/color", methods=["POST"])
+@login_required
+def set_background_color():
+    _check_csrf()
+    color = request.form.get("color", "").strip()
+    if not re.match(r"^#[0-9a-fA-F]{6}$", color):
+        flash("Background colour must be a hex value like #add8f0.")
+        return redirect(url_for("admin.plugins"))
+    models.set_background_color(color)
+    flash("Background colour updated — applies to every machine on their next check-in.")
+    return redirect(url_for("admin.plugins"))
+
+
+@bp.route("/background/image", methods=["POST"])
+@login_required
+def upload_background_image():
+    _check_csrf()
+    file = request.files.get("background_image")
+    if file is None or file.filename == "":
+        flash("Choose an image file for the background.")
+        return redirect(url_for("admin.plugins"))
+
+    old_filename = models.get_settings()["background_image_filename"]
+    # Random filename (not derived from the upload) so image_version in
+    # get_config() always changes on a re-upload, even if the admin
+    # re-uploads a file with the same original name.
+    new_filename = f"background-{secrets.token_hex(8)}.png"
+    file.save(models.background_dir() / new_filename)
+    models.set_background_image(new_filename)
+    if old_filename:
+        (models.background_dir() / old_filename).unlink(missing_ok=True)
+
+    flash("Background artwork updated — applies to every machine on their next check-in.")
+    return redirect(url_for("admin.plugins"))
+
+
+@bp.route("/background/image/clear", methods=["POST"])
+@login_required
+def clear_background_image():
+    _check_csrf()
+    old_filename = models.get_settings()["background_image_filename"]
+    models.set_background_image(None)
+    if old_filename:
+        (models.background_dir() / old_filename).unlink(missing_ok=True)
+    flash("Background artwork removed — machines fall back to the solid colour.")
     return redirect(url_for("admin.plugins"))

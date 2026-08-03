@@ -55,6 +55,15 @@ CREATE TABLE IF NOT EXISTS plugins (
     enabled INTEGER NOT NULL DEFAULT 0,
     position INTEGER
 );
+
+-- Single row (id=1) — global launcher appearance, same "one shared profile"
+-- philosophy as the plugin table: every machine gets the same background,
+-- there is no per-machine override.
+CREATE TABLE IF NOT EXISTS settings (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    background_color TEXT NOT NULL DEFAULT '#add8f0',
+    background_image_filename TEXT
+);
 """
 
 
@@ -85,6 +94,7 @@ def init_db(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript(SCHEMA)
+        conn.execute("INSERT OR IGNORE INTO settings (id) VALUES (1)")
         conn.commit()
     finally:
         conn.close()
@@ -108,6 +118,12 @@ def close_db(_exception=None) -> None:
 
 def plugins_dir() -> Path:
     d = flask.current_app.config["DATA_DIR"] / "plugins"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def background_dir() -> Path:
+    d = flask.current_app.config["DATA_DIR"] / "background"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -216,6 +232,31 @@ def set_force_home(machine_id: str, value: bool) -> None:
     db.commit()
 
 
+def get_settings() -> dict:
+    db = get_db()
+    row = db.execute(
+        "SELECT background_color, background_image_filename FROM settings WHERE id = 1"
+    ).fetchone()
+    return {
+        "background_color": row["background_color"],
+        "background_image_filename": row["background_image_filename"],
+    }
+
+
+def set_background_color(color: str) -> None:
+    db = get_db()
+    db.execute("UPDATE settings SET background_color = ? WHERE id = 1", (color,))
+    db.commit()
+
+
+def set_background_image(filename: str | None) -> None:
+    db = get_db()
+    db.execute(
+        "UPDATE settings SET background_image_filename = ? WHERE id = 1", (filename,)
+    )
+    db.commit()
+
+
 def get_config(machine_id: str) -> dict:
     """Compose the /config/<machine_id> response.
 
@@ -227,6 +268,13 @@ def get_config(machine_id: str) -> dict:
     anything it has installed locally (Phase 3); this only needs to carry
     enough for the client to detect "new/updated/removed since last poll"
     (Phase 9/10).
+
+    `background` is the one part of this response that isn't per-machine —
+    same global settings row for every machine_id, folded in here rather
+    than a separate endpoint since the client already polls this one on the
+    same schedule. `image_version` is just the stored filename itself (it
+    changes on every upload, see admin.py's upload_background_image) — good
+    enough as a change marker without a separate version column.
     """
     upsert_machine(machine_id)
     db = get_db()
@@ -236,11 +284,18 @@ def get_config(machine_id: str) -> dict:
     rows = db.execute(
         "SELECT id, version FROM plugins WHERE enabled = 1 ORDER BY position"
     ).fetchall()
+    settings_row = db.execute(
+        "SELECT background_color, background_image_filename FROM settings WHERE id = 1"
+    ).fetchone()
     return {
         "machine_id": machine_id,
         "display_name": machine_row["display_name"],
         "plugins": [{"id": r["id"], "version": r["version"]} for r in rows],
         "force_home": bool(machine_row["force_home"]),
+        "background": {
+            "color": settings_row["background_color"],
+            "image_version": settings_row["background_image_filename"],
+        },
     }
 
 

@@ -24,7 +24,7 @@
   {% if session.admin %}
   <nav class="tabs">
     <a class="tab {{ 'is-active' if request.endpoint == 'admin.machines' else '' }}" href="{{ url_for('admin.machines') }}">Machines</a>
-    <a class="tab {{ 'is-active' if request.endpoint == 'admin.plugins' else '' }}" href="{{ url_for('admin.plugins') }}">Plugins</a>
+    <a class="tab {{ 'is-active' if request.endpoint == 'admin.plugins' else '' }}" href="{{ url_for('admin.plugins') }}">Config</a>
   </nav>
   {% endif %}
 

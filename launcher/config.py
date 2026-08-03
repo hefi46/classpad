@@ -41,6 +41,15 @@ SERVER_URL_FILE = Path("/opt/classpad/server_url")
 DEFAULT_SERVER_URL = "http://classpad-admin:5000"
 CONFIG_CACHE_FILE = Path("/opt/classpad/config_cache.json")
 
+# Matches server/models.py's settings table default — used before the first
+# successful poll (and if a server response is somehow missing the
+# "background" key, e.g. an older server during a rolling upgrade).
+DEFAULT_BACKGROUND_COLOR = "#add8f0"
+# Cached alongside config_cache.json rather than in it — this is binary
+# image data, not JSON. Only ever (re)written when image_version changes,
+# so it survives server outages the same way config_cache.json does.
+BACKGROUND_IMAGE_CACHE = Path("/opt/classpad/background_image.png")
+
 # Cross-process signalling with bar/bar.py's info panel — bar.py and the
 # launcher are separate processes, so this follows the same shared-file
 # convention as process_manager.ACTIVITY_FILE rather than adding real IPC.
@@ -169,6 +178,12 @@ def fetch_config(server_url, machine_id, timeout=HTTP_TIMEOUT_SECONDS):
         return json.loads(response.read())
 
 
+def fetch_background_image(server_url, timeout=HTTP_TIMEOUT_SECONDS):
+    url = f"{server_url}/background/image"
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        return response.read()
+
+
 def post_telemetry(server_url, machine_id, *, current_activity, error, force_home_ack, timeout=HTTP_TIMEOUT_SECONDS):
     url = f"{server_url}/telemetry/{machine_id}"
     body = json.dumps(
@@ -269,9 +284,52 @@ def _maybe_enqueue(update_queue, plugins, last_applied_ids):
     return ids
 
 
+def _apply_background(response, last_state, background_queue, server_url):
+    """Detect a background colour/image change and, if there is one, hand it
+    to main.py via background_queue (same maxsize=1 handoff convention as
+    update_queue — pygame surface loading is main-thread-only, so this just
+    downloads the raw bytes and lets main.py turn them into a Surface).
+
+    background_queue is None in callers/tests that don't care about
+    background at all (kept optional so existing run_poller callers don't
+    need to change). `response` may be a live server reply or a cached one
+    (see the exception branch below) — either shape has the same
+    "background" key since save_cached_config stores the raw response.
+    """
+    if background_queue is None:
+        return last_state
+    bg = response.get("background") or {}
+    color = bg.get("color") or DEFAULT_BACKGROUND_COLOR
+    image_version = bg.get("image_version")
+    state = (color, image_version)
+    if state == last_state:
+        return last_state
+
+    if image_version:
+        try:
+            image_bytes = fetch_background_image(server_url)
+        except Exception as e:
+            print(f"warning: background image download failed: {e}", file=sys.stderr)
+            return last_state  # retry next poll rather than applying a half-updated state
+        BACKGROUND_IMAGE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = BACKGROUND_IMAGE_CACHE.with_suffix(".tmp")
+        tmp_path.write_bytes(image_bytes)
+        tmp_path.replace(BACKGROUND_IMAGE_CACHE)  # atomic swap, no half-written file ever visible
+    elif BACKGROUND_IMAGE_CACHE.exists():
+        BACKGROUND_IMAGE_CACHE.unlink()
+
+    try:
+        background_queue.get_nowait()
+    except queue.Empty:
+        pass
+    background_queue.put_nowait({"color": color, "has_image": bool(image_version)})
+    return state
+
+
 def run_poller(
     update_queue,
     stop_event,
+    background_queue=None,
     poll_interval=POLL_INTERVAL_SECONDS,
     telemetry_interval=TELEMETRY_INTERVAL_SECONDS,
     tick=POLLER_TICK_SECONDS,
@@ -288,6 +346,7 @@ def run_poller(
     last_telemetry = 0.0
     last_activity_sent = object()  # sentinel, guaranteed != any real activity value
     last_applied_ids = None
+    last_background_state = None
 
     while not stop_event.is_set():
         server_url = get_server_url()
@@ -304,6 +363,9 @@ def run_poller(
                 save_cached_config(response)
                 last_applied_ids = _maybe_enqueue(
                     update_queue, reconcile_plugins(response.get("plugins", []), scan_plugins()), last_applied_ids
+                )
+                last_background_state = _apply_background(
+                    response, last_background_state, background_queue, server_url
                 )
                 if response.get("force_home"):
                     # process_manager.kill_all() has the exact same effect as
@@ -334,6 +396,9 @@ def run_poller(
                 if cached is not None:
                     last_applied_ids = _maybe_enqueue(
                         update_queue, reconcile_plugins(cached.get("plugins", []), scan_plugins()), last_applied_ids
+                    )
+                    last_background_state = _apply_background(
+                        cached, last_background_state, background_queue, server_url
                     )
 
         current_activity = _read_current_activity()

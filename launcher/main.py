@@ -7,14 +7,35 @@ import pygame
 
 from launcher import process_manager
 from launcher.button import Button
-from launcher.config import build_button_grid, page_count, run_poller
+from launcher.config import (
+    BACKGROUND_IMAGE_CACHE,
+    DEFAULT_BACKGROUND_COLOR,
+    build_button_grid,
+    load_cached_config,
+    page_count,
+    run_poller,
+)
 from launcher.pager import Pager
 from launcher.plugin_manager import scan_plugins
 
 BAR_HEIGHT = 55  # must match bar/bar.py
-BACKGROUND_COLOR = (173, 216, 240)
 CLICK_SOUND_PATH = Path(__file__).parent / "assets" / "sounds" / "click.wav"
 FPS = 30
+
+
+def _hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip("#")
+    return tuple(int(hex_color[i : i + 2], 16) for i in (0, 2, 4))
+
+
+def _load_background_image(width, height):
+    # convert() (not convert_alpha()) since this always fills the whole
+    # window — there's nothing beneath it that transparency would reveal.
+    try:
+        image = pygame.image.load(str(BACKGROUND_IMAGE_CACHE)).convert()
+    except (pygame.error, FileNotFoundError):
+        return None
+    return pygame.transform.smoothscale(image, (width, height))
 
 
 def main():
@@ -38,6 +59,18 @@ def main():
 
     click_sound = pygame.mixer.Sound(str(CLICK_SOUND_PATH))
 
+    # Applied immediately at startup from the last-known-good cache, same
+    # reasoning as the plugin grid never being blanked (launcher/config.py):
+    # showing last session's background beats flashing the hardcoded
+    # default for the ~30s until the first poll lands.
+    cached_background = (load_cached_config() or {}).get("background") or {}
+    background_color = _hex_to_rgb(cached_background.get("color") or DEFAULT_BACKGROUND_COLOR)
+    background_image = (
+        _load_background_image(screen_width, window_height)
+        if BACKGROUND_IMAGE_CACHE.exists()
+        else None
+    )
+
     plugins = scan_plugins()
     pager = Pager()
     pager.set_page_count(page_count(len(plugins), screen_width, window_height))
@@ -55,9 +88,13 @@ def main():
     # already-locally-installed Plugin objects to update_queue for this loop
     # to turn into Buttons when convenient.
     update_queue = queue.Queue(maxsize=1)
+    background_queue = queue.Queue(maxsize=1)
     poller_stop = threading.Event()
     poller_thread = threading.Thread(
-        target=run_poller, args=(update_queue, poller_stop), daemon=True
+        target=run_poller,
+        args=(update_queue, poller_stop),
+        kwargs={"background_queue": background_queue},
+        daemon=True,
     )
     poller_thread.start()
 
@@ -107,7 +144,22 @@ def main():
                 for plugin, rect in build_button_grid(plugins, screen_width, window_height, page=pager.page)
             ]
 
-        screen.fill(BACKGROUND_COLOR)
+        try:
+            background_update = background_queue.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            background_color = _hex_to_rgb(background_update["color"])
+            background_image = (
+                _load_background_image(screen_width, window_height)
+                if background_update["has_image"]
+                else None
+            )
+
+        if background_image is not None:
+            screen.blit(background_image, (0, 0))
+        else:
+            screen.fill(background_color)
         for button in buttons:
             button.draw(screen)
         pager.draw(screen)
