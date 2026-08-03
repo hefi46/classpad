@@ -151,6 +151,21 @@ tbody tr:hover { background: var(--surface-alt); }
 .primary-btn { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
 .primary-btn:hover { background: var(--accent); color: var(--surface); }
 
+/* Coloured by current state, not by the action the button performs — a
+   green button means "this is live right now", independent of whether
+   clicking it says Enable or Disable. Glance-scannable down the table. */
+.toggle-btn.is-on { border-color: var(--good); background: var(--good-soft); color: var(--good); }
+.toggle-btn.is-on:hover { background: var(--good); color: var(--surface); }
+.toggle-btn.is-off { border-color: var(--critical); background: var(--critical-soft); color: var(--critical); }
+.toggle-btn.is-off:hover { background: var(--critical); color: var(--surface); }
+
+.delete-btn {
+  appearance: none; border: 1px solid transparent; background: none;
+  color: var(--text-muted); font-size: 0.8125rem; padding: 0.4rem 0.5rem;
+  border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+.delete-btn:hover { border-color: var(--critical); color: var(--critical); background: var(--critical-soft); }
+
 .profile-note {
   padding: 0.6rem 0.85rem; margin-bottom: 1.1rem;
   background: var(--accent-soft); color: var(--accent-ink);

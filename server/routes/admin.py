@@ -171,6 +171,32 @@ def move_plugin(plugin_id):
     return redirect(url_for("admin.plugins"))
 
 
+@bp.route("/plugins/<plugin_id>/delete", methods=["POST"])
+@login_required
+def delete_plugin(plugin_id):
+    """Website tiles only — they're wholly admin-authored (built from the
+    create-website form or a manual zip upload of the same shape), so
+    deleting the catalogue entry loses nothing that isn't trivially
+    recreated. Uploaded app-type plugins (TuxPaint, GCompris, ...) have no
+    delete path on purpose: they're the curated, vetted app set, and a
+    stray click shouldn't be able to drop one from the catalogue.
+    """
+    _check_csrf()
+    plugin = models.get_plugin(plugin_id)
+    if plugin is None:
+        flash("That plugin no longer exists.")
+        return redirect(url_for("admin.plugins"))
+    if plugin.type != "website":
+        flash("Only website tiles can be deleted.")
+        return redirect(url_for("admin.plugins"))
+
+    zip_filename = models.delete_plugin(plugin_id)
+    if zip_filename:
+        (models.plugins_dir() / zip_filename).unlink(missing_ok=True)
+    flash(f"Deleted '{plugin.name}'.")
+    return redirect(url_for("admin.plugins"))
+
+
 def _reject_traversal(zf: zipfile.ZipFile) -> str | None:
     """Same check as scripts/plugin-install.sh's Python block, applied here
     too so a malicious zip is rejected at the upload boundary rather than

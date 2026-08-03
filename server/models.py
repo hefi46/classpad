@@ -407,6 +407,34 @@ def _plugin_from_row(row: sqlite3.Row) -> Plugin:
     )
 
 
+def delete_plugin(plugin_id: str) -> str | None:
+    """Remove a catalogue entry entirely (not just disable it).
+
+    Returns the deleted row's zip_filename so the caller can remove the file
+    from disk (kept out of this function — plugins_dir() file I/O lives in
+    admin.py, same split as upload_background_image's old-file cleanup).
+    Returns None if there was no such plugin, so the route can 404/flash
+    without a separate existence check.
+
+    Deliberately does not touch machines that already have this plugin
+    installed locally — Phase 10's plugin_deploy.py never removes
+    locally-installed plugins that vanish from the catalogue (out of its
+    stated scope), so a deleted catalogue entry just stops being offered/
+    enabled going forward.
+    """
+    db = get_db()
+    row = db.execute(
+        "SELECT zip_filename, enabled FROM plugins WHERE id = ?", (plugin_id,)
+    ).fetchone()
+    if row is None:
+        return None
+    db.execute("DELETE FROM plugins WHERE id = ?", (plugin_id,))
+    if row["enabled"]:
+        _renumber_enabled(db)
+    db.commit()
+    return row["zip_filename"]
+
+
 def upsert_plugin(
     plugin_id: str,
     *,

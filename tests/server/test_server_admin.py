@@ -141,6 +141,55 @@ def test_move_plugin_up_and_down(app, client):
         assert models.get_plugin("tuxpaint").position == 1
 
 
+def test_delete_website_plugin_removes_it_from_catalogue_and_disk(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "phonics-site", name="Phonics Game", version="1.0.0", type="website",
+            description="d", zip_filename="phonics-site.zip",
+        )
+        (models.plugins_dir() / "phonics-site.zip").write_bytes(b"zip-bytes")
+
+    resp = client.post("/admin/plugins/phonics-site/delete", data={"csrf_token": csrf})
+    assert resp.status_code == 302
+    with app.app_context():
+        assert models.get_plugin("phonics-site") is None
+        assert not (models.plugins_dir() / "phonics-site.zip").exists()
+
+
+def test_delete_website_plugin_renumbers_remaining_enabled_plugins(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        for pid, ptype in (("phonics-site", "website"), ("rhymes-site", "website")):
+            models.upsert_plugin(
+                pid, name=pid, version="1.0.0", type=ptype,
+                description="d", zip_filename=f"{pid}.zip",
+            )
+        models.set_profile(["phonics-site", "rhymes-site"])
+
+    client.post("/admin/plugins/phonics-site/delete", data={"csrf_token": csrf})
+    with app.app_context():
+        assert models.get_plugin("rhymes-site").position == 0
+
+
+def test_delete_rejects_non_website_plugin_type(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+    client.post("/admin/plugins/tuxpaint/delete", data={"csrf_token": csrf})
+    with app.app_context():
+        assert models.get_plugin("tuxpaint") is not None
+
+
+def test_delete_nonexistent_plugin_is_a_no_op(app, client):
+    csrf = _login(client)
+    resp = client.post("/admin/plugins/does-not-exist/delete", data={"csrf_token": csrf})
+    assert resp.status_code == 302
+
+
 def test_upload_valid_website_plugin(app, client):
     csrf = _login(client)
     zip_bytes = _plugin_zip(WEBSITE_MANIFEST)

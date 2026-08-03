@@ -41,6 +41,7 @@
         <th>Type</th>
         <th class="sr-only">Enable</th>
         <th class="sr-only">Reorder</th>
+        <th class="sr-only">Delete</th>
       </tr>
     </thead>
     <tbody>
@@ -57,7 +58,7 @@
         <td>
           <form method="post" action="{{ url_for('admin.toggle_plugin', plugin_id=plugin.id) }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="toggle-btn">{{ "Disable" if plugin.enabled else "Enable" }}</button>
+            <button type="submit" class="toggle-btn {{ 'is-on' if plugin.enabled else 'is-off' }}">{{ "Disable" if plugin.enabled else "Enable" }}</button>
           </form>
         </td>
         <td>
@@ -76,9 +77,17 @@
           </div>
           {% endif %}
         </td>
+        <td>
+          {% if plugin.type == "website" %}
+          <form method="post" action="{{ url_for('admin.delete_plugin', plugin_id=plugin.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="delete-btn" aria-label="Delete {{ plugin.name }}">Delete</button>
+          </form>
+          {% endif %}
+        </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="empty">No plugins uploaded yet.</td></tr>
+      <tr><td colspan="7" class="empty">No plugins uploaded yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>
