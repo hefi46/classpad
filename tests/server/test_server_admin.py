@@ -340,16 +340,16 @@ def test_create_website_plugin_requires_icon(app, client):
 
 def test_set_background_color(app, client):
     csrf = _login(client)
-    client.post("/admin/background/color", data={"csrf_token": csrf, "color": "#123456"})
+    client.post("/admin/background/color", data={"csrf_token": csrf, "theme": "Mint"})
     with app.app_context():
-        assert models.get_settings()["background_color"] == "#123456"
+        assert models.get_settings()["background_color"] == models.BACKGROUND_THEMES["Mint"]
 
 
-def test_set_background_color_rejects_invalid_hex(app, client):
+def test_set_background_color_rejects_unknown_theme(app, client):
     csrf = _login(client)
-    client.post("/admin/background/color", data={"csrf_token": csrf, "color": "not-a-color"})
+    client.post("/admin/background/color", data={"csrf_token": csrf, "theme": "not-a-theme"})
     with app.app_context():
-        assert models.get_settings()["background_color"] == "#add8f0"  # unchanged default
+        assert models.get_settings()["background_color"] == "#DCEEF7"  # unchanged default
 
 
 def test_upload_background_image_stores_file_and_updates_settings(app, client):

@@ -22,6 +22,18 @@ BAR_HEIGHT = 55  # must match bar/bar.py
 CLICK_SOUND_PATH = Path(__file__).parent / "assets" / "sounds" / "click.wav"
 FPS = 30
 
+# Page-flip slide animation (2026-08-03 redesign). Deliberately cheap: the
+# tiles on both the outgoing and incoming page are already-rendered Button
+# surfaces (icon/label/shadow baked in at construction, see button.py), so
+# a "transition" here is nothing but interpolating a blit x-offset over a
+# handful of frames at the existing FPS cap — no re-rendering of text or
+# icons mid-flight, no measurable extra CPU on this hardware.
+PAGE_TRANSITION_SECONDS = 0.22
+
+
+def _ease_out_cubic(t):
+    return 1 - (1 - t) ** 3
+
 
 def _hex_to_rgb(hex_color):
     hex_color = hex_color.lstrip("#")
@@ -100,6 +112,7 @@ def main():
 
     clock = pygame.time.Clock()
     running = True
+    transition = None  # None when idle, else {"from", "to", "direction", "start"}
 
     while running:
         for event in pygame.event.get():
@@ -108,14 +121,24 @@ def main():
             elif event.type == pygame.MOUSEMOTION:
                 for button in buttons:
                     button.set_hovered(button.contains(event.pos))
+            elif transition is not None:
+                continue  # ignore clicks mid-flip — 220ms, not worth queuing
             elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                old_page = pager.page
                 if pager.handle_click(event.pos):
+                    old_buttons = buttons
                     buttons = [
                         Button(plugin, rect)
                         for plugin, rect in build_button_grid(
                             plugins, screen_width, window_height, page=pager.page
                         )
                     ]
+                    transition = {
+                        "from": old_buttons,
+                        "to": buttons,
+                        "direction": 1 if pager.page > old_page else -1,
+                        "start": pygame.time.get_ticks() / 1000.0,
+                    }
                     continue
                 for button in buttons:
                     if button.contains(event.pos):
@@ -143,6 +166,7 @@ def main():
                 Button(plugin, rect)
                 for plugin, rect in build_button_grid(plugins, screen_width, window_height, page=pager.page)
             ]
+            transition = None  # a config-driven grid change snaps, it doesn't flip
 
         try:
             background_update = background_queue.get_nowait()
@@ -160,8 +184,23 @@ def main():
             screen.blit(background_image, (0, 0))
         else:
             screen.fill(background_color)
-        for button in buttons:
-            button.draw(screen)
+
+        if transition is not None:
+            elapsed = pygame.time.get_ticks() / 1000.0 - transition["start"]
+            t = min(1.0, elapsed / PAGE_TRANSITION_SECONDS)
+            eased = _ease_out_cubic(t)
+            direction = transition["direction"]
+            to_x = round(direction * screen_width * (1 - eased))
+            from_x = round(-direction * screen_width * eased)
+            for button in transition["from"]:
+                button.draw(screen, offset=(from_x, 0))
+            for button in transition["to"]:
+                button.draw(screen, offset=(to_x, 0))
+            if t >= 1.0:
+                transition = None
+        else:
+            for button in buttons:
+                button.draw(screen)
         pager.draw(screen)
         pygame.display.flip()
         clock.tick(FPS)

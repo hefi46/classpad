@@ -41,10 +41,11 @@ SERVER_URL_FILE = Path("/opt/classpad/server_url")
 DEFAULT_SERVER_URL = "http://classpad-admin:5000"
 CONFIG_CACHE_FILE = Path("/opt/classpad/config_cache.json")
 
-# Matches server/models.py's settings table default — used before the first
-# successful poll (and if a server response is somehow missing the
-# "background" key, e.g. an older server during a rolling upgrade).
-DEFAULT_BACKGROUND_COLOR = "#add8f0"
+# Matches server/models.py's settings table default (the "Sky" curated
+# theme, see BACKGROUND_THEMES there) — used before the first successful
+# poll (and if a server response is somehow missing the "background" key,
+# e.g. an older server during a rolling upgrade).
+DEFAULT_BACKGROUND_COLOR = "#DCEEF7"
 # Cached alongside config_cache.json rather than in it — this is binary
 # image data, not JSON. Only ever (re)written when image_version changes,
 # so it survives server outages the same way config_cache.json does.

@@ -39,17 +39,37 @@ POWER_SUPPLY_DIR = Path("/sys/class/power_supply")
 # "⌂" for Home was found on real hardware to be barely visible at normal text
 # size, and there's no dependency-free speaker glyph at all: the obvious
 # Unicode candidates (🔈/🔉/🔊, U+1F508-U+1F50A) are emoji-range codepoints
-# DejaVu Sans (this image's only installed font, confirmed elsewhere in this
-# file) doesn't cover — same tofu-box problem the "⌂ not 🏠" comment below
-# already ran into once. Drawing simple flat vector shapes directly with
-# Cairo sidesteps font coverage entirely, matching how launcher/button.py's
+# DejaVu Sans doesn't cover — same tofu-box problem the "⌂ not 🏠" comment
+# below already ran into once (Quicksand, added for the 2026-08-03 redesign
+# below, doesn't cover them either — still no bundled icon font in the mix).
+# Drawing simple flat vector shapes directly with Cairo sidesteps font
+# coverage entirely, matching how the wordprocessor plugin's
 # draw_plus_icon/draw_trash_icon/draw_back_arrow_icon already hand-draw
 # icons with Pygame primitives for the same reason.
 HOME_ICON_SIZE = 34
 SPEAKER_ICON_SIZE = 24
-ICON_COLOR = (0.20, 0.20, 0.20)
-CLOCK_CSS = b".classpad-clock { font-size: 20px; font-weight: bold; }"
+
+# Soft-pastel-and-calm token set (2026-08-03 redesign) — matches
+# launcher/button.py's palette; see CLAUDE.md's "Launcher visual design"
+# section. Cairo wants 0-1 floats for set_source_rgb, so these are the same
+# named colors as button.py's RGB tuples divided by 255, not a shared import
+# (bar.py and the launcher are separate processes on separate rendering
+# stacks — nothing to share code-wise, just the same values expressed
+# per-stack).
+INK = (0.290, 0.263, 0.345)     # #4A4358
+ICON_COLOR = INK
+BAR_BACKGROUND = "#FFFCF7"      # paper cream, matches tile surface
+ACCENT_HEX = "#7CA79C"          # sage
+INK_HEX = "#4A4358"
+CLOCK_CSS = f".classpad-clock {{ font-family: Quicksand; font-size: 20px; font-weight: bold; color: {INK_HEX}; }}".encode()
+ACTIVITY_CSS = f".classpad-activity {{ font-family: Quicksand; font-weight: bold; color: {INK_HEX}; }}".encode()
 BAR_BUTTON_CSS = b".classpad-bar-btn { padding: 3px; }"
+BAR_WINDOW_CSS = f"""
+.classpad-bar {{ background-color: {BAR_BACKGROUND}; }}
+.classpad-bar scale trough {{ background-color: #E1D8DC; min-height: 4px; }}
+.classpad-bar scale trough highlight {{ background-color: {ACCENT_HEX}; min-height: 4px; }}
+.classpad-bar scale slider {{ background-color: {ACCENT_HEX}; border-radius: 100%; }}
+""".encode()
 
 # Ascending-height bar glyphs for the compact signal-strength indicator —
 # four bars rather than the previous "<dot> SSID" text, since the SSID
@@ -62,17 +82,22 @@ WIFI_BAR_GLYPHS = ["▁", "▃", "▅", "▇"]  # ▁ ▃ ▅ ▇
 # a health/warning signal ("red = something's wrong"), when it was only ever
 # meant to reflect an ordinary weak-but-fine connection. Bar *count* still
 # reflects signal strength; only the color no longer does.
-WIFI_COLOR_ACTIVE = "#1565c0"
-WIFI_COLOR_INACTIVE = "#9e9e9e"
-WIFI_COLOR_DISCONNECTED = "#c62828"
+WIFI_COLOR_ACTIVE = ACCENT_HEX
+WIFI_COLOR_INACTIVE = "#ADA0A8"   # muted dusty mauve-grey, matches tile border
+# Genuine alerts (disconnected wifi, low battery) deliberately keep a real,
+# clearly-legible red rather than folding into the pastel palette — the
+# comment above already documents a teacher once misreading a colored wifi
+# indicator as an error signal; the fix there was to stop using red for a
+# non-error state, not to make red itself less alarming.
+WIFI_COLOR_DISCONNECTED = "#C0392B"
 
 # RGB tuples (0-1 floats), not hex strings like the WIFI_COLOR_* above —
 # these feed cairo's set_source_rgb directly (the battery indicator is a
 # hand-drawn icon, matching draw_home_icon/draw_speaker_icon below, not
 # Pango markup like the wifi text glyphs).
-BATTERY_COLOR_GOOD = (0.18, 0.49, 0.20)  # #2e7d32
-BATTERY_COLOR_FAIR = (0.98, 0.66, 0.15)  # #f9a825
-BATTERY_COLOR_LOW = (0.78, 0.16, 0.16)  # #c62828
+BATTERY_COLOR_GOOD = (0.486, 0.655, 0.612)  # sage — reuses the accent, still reads as "good"
+BATTERY_COLOR_FAIR = (0.847, 0.620, 0.290)  # #D89E4A warm amber
+BATTERY_COLOR_LOW = (0.753, 0.224, 0.169)   # #C0392B warm alert red, matches wifi-disconnected
 
 BATTERY_ICON_WIDTH = 30
 BATTERY_ICON_HEIGHT = 16
@@ -506,6 +531,7 @@ class Bar(Gtk.Window):
         self.set_skip_pager_hint(True)
         self.set_keep_above(True)
         self.stick()
+        self.get_style_context().add_class("classpad-bar")
 
         screen = Gdk.Screen.get_default()
         self.screen_width = screen.get_width()
@@ -532,7 +558,7 @@ class Bar(Gtk.Window):
 
     def _build_ui(self):
         css = Gtk.CssProvider()
-        css.load_from_data(BAR_BUTTON_CSS + b"\n" + CLOCK_CSS)
+        css.load_from_data(BAR_BUTTON_CSS + b"\n" + CLOCK_CSS + b"\n" + ACTIVITY_CSS + b"\n" + BAR_WINDOW_CSS)
         Gtk.StyleContext.add_provider_for_screen(
             Gdk.Screen.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
@@ -550,6 +576,7 @@ class Bar(Gtk.Window):
         row.pack_start(home_button, False, False, 0)
 
         self.activity_label = Gtk.Label(label="")
+        self.activity_label.get_style_context().add_class("classpad-activity")
         self.activity_label.set_valign(Gtk.Align.CENTER)
         row.pack_start(self.activity_label, False, False, 0)
 

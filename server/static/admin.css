@@ -212,10 +212,10 @@ tr.is-disabled .plugin-name, tr.is-disabled .plugin-id { color: var(--text-muted
 .section-heading { font-family: var(--font-display); font-size: 1.0625rem; margin: 0 0 0.3rem; }
 .section-sub { margin: 0 0 0.9rem; color: var(--text-muted); font-size: 0.8125rem; }
 
-.website-form, .background-color-form, .background-image-form {
+.website-form, .theme-form, .background-image-form {
   display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.9rem;
 }
-.website-form label, .background-color-form label {
+.website-form label {
   display: flex; flex-direction: column; gap: 0.3rem;
   font-size: 0.8125rem; color: var(--text-muted);
 }
@@ -223,10 +223,26 @@ tr.is-disabled .plugin-name, tr.is-disabled .plugin-id { color: var(--text-muted
   padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 5px;
   background: var(--surface); color: var(--text); min-width: 14rem;
 }
-.website-form input[type="color"], .background-color-form input[type="color"] {
-  width: 3.5rem; height: 2.2rem; padding: 0.1rem; border: 1px solid var(--border);
-  border-radius: 5px; background: var(--surface); cursor: pointer;
-}
 .checkbox-label { flex-direction: row !important; align-items: center; gap: 0.4rem !important; }
 .background-image-form { margin-top: 1rem; }
+
+.theme-swatches { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+.theme-swatch {
+  display: flex; flex-direction: column; align-items: center; gap: 0.35rem;
+  cursor: pointer;
+}
+.theme-swatch input[type="radio"] {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0);
+}
+.theme-swatch-box {
+  width: 2.75rem; height: 2.75rem; border-radius: 8px;
+  border: 2px solid var(--border);
+}
+.theme-swatch input[type="radio"]:checked + .theme-swatch-box {
+  border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.theme-swatch input[type="radio"]:focus-visible + .theme-swatch-box {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.theme-swatch-label { font-size: 0.75rem; color: var(--text-muted); }
 .background-current { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; }

@@ -8,7 +8,7 @@ def test_unknown_machine_gets_empty_config(client):
         "display_name": None,
         "plugins": [],
         "force_home": False,
-        "background": {"color": "#add8f0", "image_version": None},
+        "background": {"color": "#DCEEF7", "image_version": None},
     }
 
 

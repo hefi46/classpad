@@ -29,7 +29,7 @@ apt-get install -y \
     python3 python3-pip python3-pygame \
     python3-gi python3-gi-cairo gir1.2-gtk-3.0 python3-xlib \
     chromium git curl rsync xbindkeys x11-utils xdotool \
-    alsa-utils network-manager
+    alsa-utils network-manager fonts-quicksand
 
 echo "== [2/12] Creating $KIOSK_USER user =="
 if ! id -u "$KIOSK_USER" >/dev/null 2>&1; then

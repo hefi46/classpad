@@ -1,8 +1,19 @@
+import base64
 import json
 
 import pytest
 
 from launcher.plugin_manager import PluginValidationError, load_manifest, scan_plugins
+
+# A real (if minimal) 1x1 PNG — plain magic-number-only bytes used to work
+# as a stand-in icon here, but validate_manifest now actually decodes the
+# icon (see plugin_manager.py's 2026-08-03 fix), so the fixture needs a
+# genuinely loadable image or every test using it would fail for the wrong
+# reason.
+MINIMAL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQImWP4"
+    "//8/AAX+Av5Y8msOAAAAAElFTkSuQmCC"
+)
 
 VALID_APP_MANIFEST = {
     "id": "tuxpaint",
@@ -30,7 +41,7 @@ def make_plugin_dir(tmp_path, name, manifest=None, write_icon=True, manifest_tex
     plugin_dir = tmp_path / name
     plugin_dir.mkdir()
     if write_icon:
-        (plugin_dir / "icon.png").write_bytes(b"\x89PNG\r\n")
+        (plugin_dir / "icon.png").write_bytes(MINIMAL_PNG)
     if manifest_text is not None:
         (plugin_dir / "manifest.json").write_text(manifest_text)
     elif manifest is not None:
@@ -89,6 +100,26 @@ def test_missing_icon_file_rejected(tmp_path):
 
     with pytest.raises(PluginValidationError, match="icon"):
         load_manifest(plugin_dir)
+
+
+def test_corrupt_icon_file_rejected(tmp_path):
+    plugin_dir = make_plugin_dir(tmp_path, "tuxpaint", VALID_APP_MANIFEST, write_icon=False)
+    (plugin_dir / "icon.png").write_bytes(b"not-an-image")
+
+    with pytest.raises(PluginValidationError, match="not a loadable image"):
+        load_manifest(plugin_dir)
+
+
+def test_scan_plugins_skips_corrupt_icon_without_crashing(tmp_path):
+    make_plugin_dir(tmp_path, "tuxpaint", VALID_APP_MANIFEST)
+    broken_dir = make_plugin_dir(
+        tmp_path, "broken-icon", dict(VALID_APP_MANIFEST, id="broken-icon"), write_icon=False
+    )
+    (broken_dir / "icon.png").write_bytes(b"not-an-image")
+
+    plugins = scan_plugins(tmp_path)
+
+    assert [p.id for p in plugins] == ["tuxpaint"]
 
 
 def test_icon_absolute_path_rejected(tmp_path):

@@ -2,21 +2,23 @@ import pygame
 
 from launcher.config import ARROW_ZONE_WIDTH, PAGE_INDICATOR_HEIGHT
 
-FONT_NAME = "DejaVu Sans"
+# Soft-pastel-and-calm token set (2026-08-03 redesign) — matches
+# button.py's palette; see CLAUDE.md's "Launcher visual design" section.
+FONT_NAME = "Quicksand"
 ARROW_SIZE = 56
-ARROW_COLOR = (255, 255, 255)
-ARROW_BG = (70, 150, 220)
-ARROW_BG_DISABLED = (200, 210, 220)
-ARROW_CHEVRON_COLOR = (255, 255, 255)
-ARROW_CHEVRON_COLOR_DISABLED = (150, 160, 170)
+ARROW_COLOR = (255, 252, 247)          # #FFFCF7 paper, matches tile surface
+ARROW_BG = (124, 167, 156)             # #7CA79C sage accent
+ARROW_BG_DISABLED = (225, 220, 228)    # pale dusty lilac, not cold grey
+ARROW_CHEVRON_COLOR = (255, 252, 247)
+ARROW_CHEVRON_COLOR_DISABLED = (190, 182, 195)
 
 DOT_RADIUS = 20
 DOT_GAP = 56
-DOT_COLOR_ACTIVE = (70, 150, 220)
-DOT_COLOR_INACTIVE = (255, 255, 255)
-DOT_BORDER_COLOR = (90, 90, 90)
-DOT_LABEL_COLOR_ACTIVE = (255, 255, 255)
-DOT_LABEL_COLOR_INACTIVE = (60, 60, 60)
+DOT_COLOR_ACTIVE = (124, 167, 156)     # sage accent
+DOT_COLOR_INACTIVE = (255, 252, 247)   # paper
+DOT_BORDER_COLOR = (201, 186, 194)     # dusty mauve, matches tile border
+DOT_LABEL_COLOR_ACTIVE = (255, 252, 247)
+DOT_LABEL_COLOR_INACTIVE = (74, 67, 88)  # ink
 
 
 class Pager:

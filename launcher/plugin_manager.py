@@ -5,6 +5,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import pygame
+
 PLUGINS_DIR = Path("/opt/classpad/plugins")
 
 VALID_TYPES = {"app", "website", "custom"}
@@ -55,6 +57,21 @@ def validate_manifest(data, plugin_dir):
         raise PluginValidationError(f"icon path escapes plugin directory: {data['icon']}")
     if not icon_path.is_file():
         raise PluginValidationError(f"icon file not found: {icon_path}")
+    try:
+        pygame.image.load(str(icon_path))
+    except pygame.error as e:
+        # Found on real hardware (2026-08-03): an orphaned plugin with a
+        # corrupt icon.png crashed button.py's Button() construction with
+        # an uncaught pygame.error deep in main()'s startup path — not a
+        # hang, a genuine unhandled exception, so systemd's Restart=always
+        # just relaunched straight back into the same crash forever, and
+        # the recovery hotkey (which only kills/restarts processes) had
+        # nothing it could do about it. Rejecting an undecodable icon here
+        # means it's caught by scan_plugins()'s existing PluginValidationError
+        # skip-with-a-warning handling instead — the same "one bad plugin
+        # doesn't take down the whole grid" treatment a missing manifest.json
+        # already gets, just extended to cover unreadable icon bytes too.
+        raise PluginValidationError(f"icon file is not a loadable image: {icon_path}: {e}")
 
     if plugin_type in ("app", "custom"):
         launch_command = data.get("launch_command")

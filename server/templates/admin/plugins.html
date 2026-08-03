@@ -106,12 +106,18 @@
   <h2 class="section-heading">Background</h2>
   <p class="section-sub">Home screen appearance — applies to every machine on their next check-in.</p>
 
-  <form method="post" action="{{ url_for('admin.set_background_color') }}" class="background-color-form">
+  <form method="post" action="{{ url_for('admin.set_background_color') }}" class="theme-form">
+    <div class="theme-swatches">
+      {% for name, hex in background_themes.items() %}
+      <label class="theme-swatch">
+        <input type="radio" name="theme" value="{{ name }}" {{ "checked" if hex == settings.background_color else "" }}>
+        <span class="theme-swatch-box" style="background-color: {{ hex }};"></span>
+        <span class="theme-swatch-label">{{ name }}</span>
+      </label>
+      {% endfor %}
+    </div>
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Colour
-      <input type="color" name="color" value="{{ settings.background_color }}">
-    </label>
-    <button type="submit" class="primary-btn">Save colour</button>
+    <button type="submit" class="primary-btn">Save theme</button>
   </form>
 
   <form method="post" action="{{ url_for('admin.upload_background_image') }}" enctype="multipart/form-data" class="background-image-form">

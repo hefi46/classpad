@@ -61,10 +61,25 @@ CREATE TABLE IF NOT EXISTS plugins (
 -- there is no per-machine override.
 CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    background_color TEXT NOT NULL DEFAULT '#add8f0',
+    background_color TEXT NOT NULL DEFAULT '#DCEEF7',
     background_image_filename TEXT
 );
 """
+
+# Curated background themes (2026-08-03 redesign) — replaces a freeform hex
+# colour picker in the admin portal. A raw <input type="color"> let an admin
+# pick a background that clashed with or killed contrast against the
+# launcher's fixed tile/accent palette (launcher/button.py); a small,
+# pre-approved set is guaranteed to work with it. Storage stays a plain hex
+# string in `settings.background_color` — the client-facing /config
+# contract doesn't change, only how the admin portal lets you choose one.
+BACKGROUND_THEMES = {
+    "Sky": "#DCEEF7",
+    "Mint": "#E2F0E4",
+    "Blush": "#FBE7E6",
+    "Butter": "#FCF2DA",
+    "Lilac": "#ECE4F5",
+}
 
 
 @dataclass

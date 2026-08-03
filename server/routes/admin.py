@@ -150,6 +150,7 @@ def plugins():
         plugins=enabled + disabled,
         enabled_count=len(enabled),
         settings=models.get_settings(),
+        background_themes=models.BACKGROUND_THEMES,
     )
 
 
@@ -359,13 +360,18 @@ def create_website_plugin():
 @bp.route("/background/color", methods=["POST"])
 @login_required
 def set_background_color():
+    """Theme name in, curated hex out — never a raw hex value from the form.
+    See models.BACKGROUND_THEMES for why this is a fixed set rather than a
+    freeform colour picker.
+    """
     _check_csrf()
-    color = request.form.get("color", "").strip()
-    if not re.match(r"^#[0-9a-fA-F]{6}$", color):
-        flash("Background colour must be a hex value like #add8f0.")
+    theme = request.form.get("theme", "")
+    color = models.BACKGROUND_THEMES.get(theme)
+    if color is None:
+        flash("Choose one of the background themes.")
         return redirect(url_for("admin.plugins"))
     models.set_background_color(color)
-    flash("Background colour updated — applies to every machine on their next check-in.")
+    flash(f"Background theme set to {theme} — applies to every machine on their next check-in.")
     return redirect(url_for("admin.plugins"))
 
 
