@@ -58,6 +58,7 @@ DEFAULT_DISABLED = [
     "libreoffice-calc",
     "libreoffice-impress",
     "luanti",
+    "luanti-singleplayer",
     "cheese",
 ]
 
