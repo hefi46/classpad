@@ -1,9 +1,11 @@
 import json
 import re
 import zipfile
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 
 from server import models
+from server.routes.admin import _relative_time
 from tests.server.conftest import TEST_ADMIN_PASSWORD, TEST_ADMIN_USERNAME
 
 
@@ -49,6 +51,50 @@ def test_admin_routes_require_login(client):
     resp = client.get("/admin/machines")
     assert resp.status_code == 302
     assert "/admin/login" in resp.headers["Location"]
+
+
+def _iso(seconds_ago: float) -> str:
+    return (datetime.now(timezone.utc) - timedelta(seconds=seconds_ago)).isoformat()
+
+
+def test_relative_time_none_is_never():
+    assert _relative_time(None) == "never"
+
+
+def test_relative_time_seconds():
+    assert _relative_time(_iso(5)) == "5s ago"
+    assert _relative_time(_iso(59)) == "59s ago"
+
+
+def test_relative_time_minutes():
+    assert _relative_time(_iso(60)) == "1m ago"
+    assert _relative_time(_iso(90)) == "1m ago"
+    assert _relative_time(_iso(3599)) == "59m ago"
+
+
+def test_relative_time_hours():
+    assert _relative_time(_iso(3600)) == "1h ago"
+    assert _relative_time(_iso(86399)) == "23h ago"
+
+
+def test_relative_time_days():
+    assert _relative_time(_iso(86400)) == "1d ago"
+    assert _relative_time(_iso(86400 * 3 + 100)) == "3d ago"
+
+
+def test_machines_page_shows_relative_last_seen(app, client):
+    _login(client)
+    with app.app_context():
+        db = models.get_db()
+        db.execute(
+            "INSERT INTO machines (id, force_home, last_seen) VALUES (?, 0, ?)",
+            ("11e-abc123", _iso(125)),
+        )
+        db.commit()
+
+    page = client.get("/admin/machines")
+    assert b"2m ago" in page.data
+    assert b'title="' in page.data  # exact ISO timestamp still available on hover
 
 
 def test_login_wrong_password_rejected(client):

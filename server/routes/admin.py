@@ -114,10 +114,30 @@ def _machine_status(machine: models.Machine) -> str:
     return "offline"
 
 
+def _relative_time(iso_str: str | None) -> str:
+    """Friendly "how long ago" for the machines-page Last Seen column, in
+    place of a raw ISO timestamp — a teacher glancing at the roster wants
+    "3m ago", not to parse a timezone-aware ISO string. Purely a display
+    format, independent of _machine_status's online/stale/offline decision
+    above even though the breakpoints rhyme (seconds -> minutes -> hours ->
+    days).
+    """
+    if iso_str is None:
+        return "never"
+    age = max(0.0, (datetime.now(timezone.utc) - datetime.fromisoformat(iso_str)).total_seconds())
+    if age < 60:
+        return f"{int(age)}s ago"
+    if age < 3600:
+        return f"{int(age // 60)}m ago"
+    if age < 86400:
+        return f"{int(age // 3600)}h ago"
+    return f"{int(age // 86400)}d ago"
+
+
 @bp.route("/machines")
 @login_required
 def machines():
-    rows = [(m, _machine_status(m)) for m in models.list_machines()]
+    rows = [(m, _machine_status(m), _relative_time(m.last_seen)) for m in models.list_machines()]
     settings = models.get_settings()  # also lazily clears an expired lock — see models.get_settings
     lock_id = settings["lock_to_app"]
     locked_plugin = models.get_plugin(lock_id) if lock_id else None

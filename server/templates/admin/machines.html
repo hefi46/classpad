@@ -30,7 +30,7 @@
     </tr>
   </thead>
   <tbody>
-    {% for machine, status in rows %}
+    {% for machine, status, last_seen_relative in rows %}
     <tr>
       <td>
         <div class="identity">
@@ -46,7 +46,7 @@
       <td>
         {% if machine.current_activity %}{{ machine.current_activity }}{% else %}<span class="muted">On launcher</span>{% endif %}
       </td>
-      <td class="mono">{{ machine.last_seen or "never" }}</td>
+      <td class="mono" title="{{ machine.last_seen or '' }}">{{ last_seen_relative }}</td>
       <td>
         <form method="post" action="{{ url_for('admin.force_home', machine_id=machine.id) }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
