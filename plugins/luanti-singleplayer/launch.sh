@@ -18,6 +18,15 @@
 # specifically so `bind_address = 127.0.0.1` here can't affect a future
 # dedicated-local-server tile, which needs the opposite (listening on the
 # LAN) — the two tiles must stay fully independent. See CLAUDE.md.
+#
+# Runs genuinely fullscreen (fullscreen = true in the config below), not
+# just maximized — same exception CLAUDE.md already grants GCompris-qt/
+# TuxMath: the game captures the mouse during play, so the bar is
+# unreachable either way without pressing Escape first, and Escape reaches
+# a mouse-clickable pause-menu exit (confirmed on real hardware) — the
+# recovery hotkey and that exit cover getting back to the launcher, so
+# there's no benefit to keeping the bar nominally visible-but-unusable
+# behind maximized-not-fullscreen.
 set -u
 
 WORLD_DIR="$HOME/.minetest/worlds/classpad-world"
@@ -42,28 +51,8 @@ if [ ! -f "$CONFIG_FILE" ]; then
     cat > "$CONFIG_FILE" <<EOF
 name = student
 bind_address = 127.0.0.1
+fullscreen = true
 EOF
 fi
 
-# No CLI/config flag maximizes the window on launch (checked --help; the
-# `fullscreen` config setting means real fullscreen, which would cover the
-# bar like GCompris/TuxMath — not what was asked for here, just a big
-# windowed session). Backgrounded + polled + wmctrl-maximized instead,
-# exactly like plugins/cheese/launch.sh's existing pattern — same reasoning
-# there applies here (no dbus-launch in this session, so GSettings/window
-# state doesn't persist, and a bounded poll is what actually works on this
-# xdotool version rather than `--sync`).
-/usr/games/luanti --go --world "$WORLD_DIR" --gameid minetest --config "$CONFIG_FILE" &
-pid=$!
-
-win=""
-for _ in $(seq 1 30); do
-    win="$(xdotool search --onlyvisible --class Luanti 2>/dev/null | head -1)"
-    [ -n "$win" ] && break
-    sleep 0.2
-done
-if [ -n "$win" ]; then
-    wmctrl -x -r Luanti.Luanti -b add,maximized_vert,maximized_horz 2>/dev/null || true
-fi
-
-wait "$pid"
+exec /usr/games/luanti --go --world "$WORLD_DIR" --gameid minetest --config "$CONFIG_FILE"
