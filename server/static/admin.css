@@ -258,6 +258,7 @@ tr.is-disabled .plugin-name, tr.is-disabled .plugin-id { color: var(--text-muted
 }
 .lock-active-label { margin: 0; font-size: 0.875rem; }
 .lock-missing { font-size: 0.8125rem; }
+.lock-expiry { display: inline-block; margin-top: 0.3rem; font-size: 0.8125rem; opacity: 0.85; }
 .unlock-btn, .lock-btn {
   appearance: none; border: 1px solid var(--warn); background: var(--surface);
   color: var(--warn); font-weight: 600; font-size: 0.8125rem;
@@ -273,6 +274,14 @@ tr.is-disabled .plugin-name, tr.is-disabled .plugin-id { color: var(--text-muted
 .lock-form select {
   padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 5px;
   background: var(--surface); color: var(--text); min-width: 12rem;
+}
+.lock-duration-group {
+  display: flex; gap: 0.9rem; align-items: center;
+  border: none; margin: 0; padding: 0;
+}
+.lock-duration-option {
+  display: flex !important; flex-direction: row !important; align-items: center;
+  gap: 0.3rem !important; font-size: 0.8125rem; color: var(--text); cursor: pointer;
 }
 
 /* Full-width variant of .lock-active above, for the machines page — same

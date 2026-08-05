@@ -1,9 +1,10 @@
 """Covers server/models.py behaviour that isn't reachable through a route
-(currently just the settings-table migration) — see the other
-tests/server/test_server_*.py files for route-level coverage.
+(the settings-table migration, and Lock to App's timed-expiry logic) — see
+the other tests/server/test_server_*.py files for route-level coverage.
 """
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 from server import models
 
@@ -52,3 +53,57 @@ def test_init_db_is_idempotent_against_already_migrated_schema(tmp_path):
     row = conn.execute("SELECT lock_to_app FROM settings WHERE id = 1").fetchone()
     conn.close()
     assert row == (None,)
+
+
+def test_set_lock_to_app_with_indefinite_duration_sets_no_expiry(app):
+    with app.app_context():
+        models.set_lock_to_app("tuxpaint", duration=None)
+        assert models.get_settings()["lock_to_app_expires_at"] is None
+
+
+def test_set_lock_to_app_with_duration_stores_a_future_expiry(app):
+    with app.app_context():
+        models.set_lock_to_app("tuxpaint", duration=timedelta(hours=2))
+        settings = models.get_settings()
+    assert settings["lock_to_app"] == "tuxpaint"
+    expires_at = datetime.fromisoformat(settings["lock_to_app_expires_at"])
+    delta = expires_at - datetime.now(timezone.utc)
+    assert timedelta(hours=1, minutes=59) < delta <= timedelta(hours=2)
+
+
+def test_get_settings_auto_clears_an_expired_lock(app):
+    with app.app_context():
+        models.set_lock_to_app("tuxpaint", duration=timedelta(hours=2))
+        # Directly overwrite with an already-past expiry rather than
+        # mocking the clock — set_lock_to_app itself always computes a
+        # future expiry, so this is the simplest way to get an expired one
+        # into the DB for the test.
+        db = models.get_db()
+        past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        db.execute("UPDATE settings SET lock_to_app_expires_at = ? WHERE id = 1", (past,))
+        db.commit()
+
+        settings = models.get_settings()
+    assert settings["lock_to_app"] is None
+    assert settings["lock_to_app_expires_at"] is None
+
+
+def test_get_settings_leaves_a_not_yet_expired_lock_alone(app):
+    with app.app_context():
+        models.set_lock_to_app("tuxpaint", duration=timedelta(hours=2))
+        settings = models.get_settings()
+    assert settings["lock_to_app"] == "tuxpaint"
+    assert settings["lock_to_app_expires_at"] is not None
+
+
+def test_get_config_reflects_auto_cleared_expired_lock(app, client):
+    with app.app_context():
+        models.set_lock_to_app("tuxpaint", duration=timedelta(hours=2))
+        db = models.get_db()
+        past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+        db.execute("UPDATE settings SET lock_to_app_expires_at = ? WHERE id = 1", (past,))
+        db.commit()
+
+    data = client.get("/config/11e-abc123").get_json()
+    assert data["lock_to_app"] is None
+    assert "lock_to_app_expires_at" not in data  # never leaked to the client — see get_config's docstring

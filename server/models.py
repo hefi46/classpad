@@ -30,7 +30,7 @@ just see it in the admin portal.
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import flask
@@ -63,7 +63,8 @@ CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     background_color TEXT NOT NULL DEFAULT '#DCEEF7',
     background_image_filename TEXT,
-    lock_to_app TEXT
+    lock_to_app TEXT,
+    lock_to_app_expires_at TEXT
 );
 """
 
@@ -95,6 +96,26 @@ BACKGROUND_THEMES = {
     "Lilac": "#ECE4F5",
 }
 
+# Curated durations for Lock to App (2026-08-05), same "fixed set, not a
+# freeform input" reasoning as BACKGROUND_THEMES — a raw number-of-hours
+# field invites a typo that locks a classroom out for a nonsense span with
+# no easy undo if the admin isn't back at a computer. `None` (indefinite)
+# means no expiry at all, matching the feature's original no-timer
+# behaviour — existing/manual `set_lock_to_app` calls that don't pass
+# `expires_at` stay indefinite by default, so this is purely additive.
+LOCK_DURATIONS = {
+    "2h": timedelta(hours=2),
+    "24h": timedelta(hours=24),
+    "indefinite": None,
+}
+# Kept alongside LOCK_DURATIONS rather than derived from its keys, so a
+# label can read naturally ("2 hours") without reverse-parsing "2h".
+LOCK_DURATION_LABELS = {
+    "2h": "2 hours",
+    "24h": "24 hours",
+    "indefinite": "indefinitely",
+}
+
 
 @dataclass
 class Machine:
@@ -124,6 +145,7 @@ def init_db(db_path: Path) -> None:
     try:
         conn.executescript(SCHEMA)
         _ensure_column(conn, "settings", "lock_to_app", "TEXT")
+        _ensure_column(conn, "settings", "lock_to_app_expires_at", "TEXT")
         conn.execute("INSERT OR IGNORE INTO settings (id) VALUES (1)")
         conn.commit()
     finally:
@@ -262,15 +284,43 @@ def set_force_home(machine_id: str, value: bool) -> None:
     db.commit()
 
 
+def _expire_lock_if_needed(db: sqlite3.Connection, row: sqlite3.Row) -> sqlite3.Row:
+    """Lazily clear an expired timed lock on read, rather than running a
+    scheduler — there's no job-scheduling infra anywhere else in this
+    project (SQLite, no Celery/cron), and every machine already polls
+    /config every 30s, so the lock is guaranteed to be re-checked soon
+    after it actually expires regardless of whether an admin is looking at
+    the portal. Every caller of `settings` goes through get_settings()
+    (get_config() included), so doing it here covers all of them in one
+    place. Mutating state inside a "getter" is a deliberate lazy-TTL
+    pattern, not an oversight.
+    """
+    expires_at = row["lock_to_app_expires_at"]
+    if row["lock_to_app"] and expires_at:
+        if datetime.fromisoformat(expires_at) <= datetime.now(timezone.utc):
+            db.execute(
+                "UPDATE settings SET lock_to_app = NULL, lock_to_app_expires_at = NULL WHERE id = 1"
+            )
+            db.commit()
+            row = db.execute(
+                "SELECT background_color, background_image_filename, lock_to_app, "
+                "lock_to_app_expires_at FROM settings WHERE id = 1"
+            ).fetchone()
+    return row
+
+
 def get_settings() -> dict:
     db = get_db()
     row = db.execute(
-        "SELECT background_color, background_image_filename, lock_to_app FROM settings WHERE id = 1"
+        "SELECT background_color, background_image_filename, lock_to_app, "
+        "lock_to_app_expires_at FROM settings WHERE id = 1"
     ).fetchone()
+    row = _expire_lock_if_needed(db, row)
     return {
         "background_color": row["background_color"],
         "background_image_filename": row["background_image_filename"],
         "lock_to_app": row["lock_to_app"],
+        "lock_to_app_expires_at": row["lock_to_app_expires_at"],
     }
 
 
@@ -288,15 +338,28 @@ def set_background_image(filename: str | None) -> None:
     db.commit()
 
 
-def set_lock_to_app(plugin_id: str | None) -> None:
+def set_lock_to_app(plugin_id: str | None, duration: timedelta | None = None) -> None:
     """Global, same "one shared profile" philosophy as background/plugins —
-    there is no per-machine lock, `plugin_id=None` clears it. The caller
-    (admin.py) is responsible for only ever passing an id that's currently
-    an enabled catalogue entry; this layer doesn't validate that itself
-    (same division of responsibility as set_profile/toggle_plugin_enabled
-    below, which don't validate ids either)."""
+    there is no per-machine lock, `plugin_id=None` clears it (and its
+    expiry, if any). The caller (admin.py) is responsible for only ever
+    passing an id that's currently an enabled catalogue entry, and a
+    `duration` that's one of LOCK_DURATIONS' values; this layer doesn't
+    re-validate either (same division of responsibility as
+    set_profile/toggle_plugin_enabled below, which don't validate ids
+    either).
+
+    `duration=None` means indefinite — no expiry column set, matching this
+    function's original (pre-timer) behaviour, so every existing call site
+    that doesn't pass a duration keeps working unchanged.
+    """
+    expires_at = (
+        (datetime.now(timezone.utc) + duration).isoformat() if (plugin_id and duration) else None
+    )
     db = get_db()
-    db.execute("UPDATE settings SET lock_to_app = ? WHERE id = 1", (plugin_id,))
+    db.execute(
+        "UPDATE settings SET lock_to_app = ?, lock_to_app_expires_at = ? WHERE id = 1",
+        (plugin_id, expires_at),
+    )
     db.commit()
 
 
@@ -329,6 +392,10 @@ def get_config(machine_id: str) -> dict:
     locked plugin without clearing the lock first, the client still needs
     to see which id it's supposed to be locked to in order to detect that
     it's no longer resolvable and fall back safely (see launcher/main.py).
+    A timed lock (LOCK_DURATIONS) that's since expired is already cleared
+    by the time this reads it — see get_settings()/_expire_lock_if_needed,
+    called here rather than duplicated, so a poll landing right after
+    expiry sees `null` with no separate expiry-check of its own.
     """
     upsert_machine(machine_id)
     db = get_db()
@@ -338,19 +405,17 @@ def get_config(machine_id: str) -> dict:
     rows = db.execute(
         "SELECT id, version FROM plugins WHERE enabled = 1 ORDER BY position"
     ).fetchall()
-    settings_row = db.execute(
-        "SELECT background_color, background_image_filename, lock_to_app FROM settings WHERE id = 1"
-    ).fetchone()
+    settings = get_settings()
     return {
         "machine_id": machine_id,
         "display_name": machine_row["display_name"],
         "plugins": [{"id": r["id"], "version": r["version"]} for r in rows],
         "force_home": bool(machine_row["force_home"]),
         "background": {
-            "color": settings_row["background_color"],
-            "image_version": settings_row["background_image_filename"],
+            "color": settings["background_color"],
+            "image_version": settings["background_image_filename"],
         },
-        "lock_to_app": settings_row["lock_to_app"],
+        "lock_to_app": settings["lock_to_app"],
     }
 
 

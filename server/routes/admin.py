@@ -118,10 +118,15 @@ def _machine_status(machine: models.Machine) -> str:
 @login_required
 def machines():
     rows = [(m, _machine_status(m)) for m in models.list_machines()]
-    lock_id = models.get_settings()["lock_to_app"]
+    settings = models.get_settings()  # also lazily clears an expired lock — see models.get_settings
+    lock_id = settings["lock_to_app"]
     locked_plugin = models.get_plugin(lock_id) if lock_id else None
     return render_template(
-        "admin/machines.html", rows=rows, lock_id=lock_id, locked_plugin=locked_plugin
+        "admin/machines.html",
+        rows=rows,
+        lock_id=lock_id,
+        locked_plugin=locked_plugin,
+        lock_expires_at=settings["lock_to_app_expires_at"],
     )
 
 
@@ -160,6 +165,7 @@ def plugins():
         enabled_count=len(enabled),
         settings=settings,
         background_themes=models.BACKGROUND_THEMES,
+        lock_duration_labels=models.LOCK_DURATION_LABELS,
         locked_plugin=locked_plugin,
     )
 
@@ -441,7 +447,9 @@ def set_lock_to_app():
     here too, same "never trust the form value alone" rule as
     set_background_color's theme lookup): locking to something not in the
     shared profile would put every machine on an app nothing else in the
-    admin UI treats as active.
+    admin UI treats as active. Same re-check for `duration_key` against
+    models.LOCK_DURATIONS — a raw hours value from the form was deliberately
+    not used (see models.py's LOCK_DURATIONS comment).
     """
     _check_csrf()
     plugin_id = request.form.get("plugin_id", "")
@@ -449,10 +457,17 @@ def set_lock_to_app():
     if plugin is None or not plugin.enabled:
         flash("Choose one of the enabled plugins to lock to.")
         return redirect(url_for("admin.plugins"))
-    models.set_lock_to_app(plugin_id)
+
+    duration_key = request.form.get("duration", "indefinite")
+    if duration_key not in models.LOCK_DURATIONS:
+        flash("Choose one of the listed durations.")
+        return redirect(url_for("admin.plugins"))
+
+    models.set_lock_to_app(plugin_id, models.LOCK_DURATIONS[duration_key])
+    duration_label = models.LOCK_DURATION_LABELS[duration_key]
     flash(
-        f"Locked every machine to '{plugin.name}' — it relaunches automatically if closed, "
-        "until you unlock below."
+        f"Locked every machine to '{plugin.name}' for {duration_label} — it relaunches "
+        "automatically if closed, until it expires or you unlock below."
     )
     return redirect(url_for("admin.plugins"))
 

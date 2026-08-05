@@ -421,6 +421,54 @@ def test_set_lock_to_app_requires_enabled_plugin(app, client):
         assert models.get_settings()["lock_to_app"] == "tuxpaint"
 
 
+def test_set_lock_to_app_with_duration_stores_an_expiry(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+        models.set_profile(["tuxpaint"])
+
+    client.post(
+        "/admin/lock-to-app",
+        data={"csrf_token": csrf, "plugin_id": "tuxpaint", "duration": "2h"},
+    )
+    with app.app_context():
+        assert models.get_settings()["lock_to_app_expires_at"] is not None
+
+
+def test_set_lock_to_app_omitting_duration_defaults_to_indefinite(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+        models.set_profile(["tuxpaint"])
+
+    client.post("/admin/lock-to-app", data={"csrf_token": csrf, "plugin_id": "tuxpaint"})
+    with app.app_context():
+        assert models.get_settings()["lock_to_app_expires_at"] is None
+
+
+def test_set_lock_to_app_rejects_unknown_duration(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+        models.set_profile(["tuxpaint"])
+
+    client.post(
+        "/admin/lock-to-app",
+        data={"csrf_token": csrf, "plugin_id": "tuxpaint", "duration": "99h"},
+    )
+    with app.app_context():
+        assert models.get_settings()["lock_to_app"] is None  # rejected, never locked
+
+
 def test_set_lock_to_app_rejects_disabled_plugin(app, client):
     csrf = _login(client)
     with app.app_context():

@@ -111,6 +111,10 @@
     <p class="lock-active-label">
       🔒 Locked to <strong>{{ locked_plugin.name if locked_plugin else settings.lock_to_app }}</strong>
       {% if not locked_plugin %}<span class="lock-missing">— this plugin no longer exists; unlock below</span>{% endif %}
+      <br>
+      <span class="lock-expiry">
+        {% if settings.lock_to_app_expires_at %}Expires {{ settings.lock_to_app_expires_at }} UTC — auto-unlocks then{% else %}Indefinite — stays locked until you unlock it{% endif %}
+      </span>
     </p>
     <form method="post" action="{{ url_for('admin.clear_lock_to_app') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -127,6 +131,15 @@
         {% endfor %}
       </select>
     </label>
+    <fieldset class="lock-duration-group">
+      <legend class="sr-only">For</legend>
+      {% for key, label in lock_duration_labels.items() %}
+      <label class="lock-duration-option">
+        <input type="radio" name="duration" value="{{ key }}" {{ "checked" if key == "2h" else "" }}>
+        {{ label|capitalize }}
+      </label>
+      {% endfor %}
+    </fieldset>
     <button type="submit" class="lock-btn" {{ "disabled" if not enabled_plugins else "" }}>Lock</button>
   </form>
   {% if not enabled_plugins %}

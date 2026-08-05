@@ -141,6 +141,22 @@ def test_lock_to_app_is_shared_across_machines(app, client):
     assert data_a["lock_to_app"] == data_b["lock_to_app"] == "tuxpaint"
 
 
+def test_lock_to_app_expiry_is_never_exposed_to_the_client(app, client):
+    """The timer/expiry is an admin-portal-only concept — the client isn't
+    meant to know a duration was even picked, just that lock_to_app is a
+    plugin id or null (see get_config's docstring and models.set_lock_to_app).
+    """
+    with app.app_context():
+        from datetime import timedelta
+
+        models.set_lock_to_app("tuxpaint", duration=timedelta(hours=2))
+
+    data = client.get("/config/11e-abc123").get_json()
+    assert data["lock_to_app"] == "tuxpaint"
+    assert "lock_to_app_expires_at" not in data
+    assert "expires" not in str(data).lower()
+
+
 def test_force_home_flag_surfaces_in_config(app, client):
     with app.app_context():
         models.set_force_home("11e-abc123", True)

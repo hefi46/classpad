@@ -6,7 +6,7 @@
   <p class="lock-banner-label">
     🔒 Every machine is locked to <strong>{{ locked_plugin.name if locked_plugin else lock_id }}</strong>
     {% if not locked_plugin %}<span class="lock-missing">— this plugin no longer exists</span>{% endif %}
-    — the launcher grid isn't reachable until you unlock.
+    — the launcher grid isn't reachable until it {% if lock_expires_at %}expires ({{ lock_expires_at }} UTC) or you{% else %}you{% endif %} unlock it.
   </p>
   <form method="post" action="{{ url_for('admin.clear_lock_to_app') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
