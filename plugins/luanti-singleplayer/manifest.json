@@ -1,0 +1,9 @@
+{
+  "id": "luanti-singleplayer",
+  "name": "Luanti Solo",
+  "version": "1.0.0",
+  "type": "app",
+  "launch_command": "/opt/classpad/plugins/luanti-singleplayer/launch.sh",
+  "icon": "icon.png",
+  "description": "Build and explore your own block world — test tile, not yet vetted for classroom use"
+}
