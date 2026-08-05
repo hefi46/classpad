@@ -8,7 +8,8 @@ ACTIVITY_FILE="${CLASSPAD_ACTIVITY_FILE:-/tmp/classpad_activity}"
 # these are the real binary names, and -f would also catch e.g. a custom
 # plugin's argv that happens to mention one of them.
 # soffice.bin: `soffice` is a wrapper script that execs this; comm is the real binary.
-KILL_LIST=(chromium tuxpaint tuxtype tuxmath gcompris-qt xylophone wordprocessor cheese soffice.bin)
+# luanti: Debian's current package/binary name for Minetest, comm confirmed on real hardware.
+KILL_LIST=(chromium tuxpaint tuxtype tuxmath gcompris-qt xylophone wordprocessor cheese soffice.bin luanti)
 
 # SIGKILL, not the pkill default (SIGTERM) — confirmed on real hardware that
 # TuxPaint catches SIGTERM and shows an "unsaved changes?" dialog instead of

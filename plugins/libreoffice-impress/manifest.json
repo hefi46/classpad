@@ -1,0 +1,9 @@
+{
+  "id": "libreoffice-impress",
+  "name": "Impress",
+  "version": "1.0.0",
+  "type": "app",
+  "launch_command": "/usr/bin/soffice --impress --nologo --norestore",
+  "icon": "icon.png",
+  "description": "Full presentation editor — test tile, not yet vetted for classroom use"
+}

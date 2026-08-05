@@ -1,0 +1,9 @@
+{
+  "id": "libreoffice-calc",
+  "name": "Calc",
+  "version": "1.0.0",
+  "type": "app",
+  "launch_command": "/usr/bin/soffice --calc --nologo --norestore",
+  "icon": "icon.png",
+  "description": "Full spreadsheet — test tile, not yet vetted for classroom use"
+}

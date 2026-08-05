@@ -7,12 +7,28 @@ RUN pip install --no-cache-dir -r server/requirements.txt
 
 COPY server/ server/
 # The admin portal's plugin-upload validation reuses the manifest schema
-# from launcher/plugin_manager.py (pure stdlib, no pygame import at module
-# level) rather than re-implementing it — one schema, one validator, shared
-# by the client's local scan and the server's upload path.
+# from launcher/plugin_manager.py rather than re-implementing it — one
+# schema, one validator, shared by the client's local scan and the server's
+# upload path. That module imports pygame at module level (needed for the
+# icon-decodability check added 2026-08-03, see CLAUDE.md) — `pygame` is in
+# requirements.txt for exactly this reason; it was missing until found while
+# building the catalogue-seeding feature (2026-08-05), which imports this
+# same module. pygame's PyPI wheel bundles its own SDL2, so plain `pip
+# install pygame` is sufficient here — no extra apt packages needed, and
+# pygame.image.load() doesn't touch a display, so it works fine in this
+# headless container (same reasoning as scripts/plugin_deploy.py, which
+# imports this module as root with no X session on the client).
 COPY launcher/ launcher/
+# Read by server/seed_plugins.py to build the initial catalogue on a fresh
+# install — see that file for what's actually seeded and why this isn't
+# automatic inside create_app()/init_db() itself.
+COPY plugins/ plugins/
 
 ENV CLASSPAD_DATA_DIR=/data
 EXPOSE 5000
 
-CMD ["gunicorn", "--bind", "0.0.0.0:5000", "server.app:create_app()"]
+# seed_plugins.py is idempotent (no-ops once the plugins table has any
+# rows), so running it on every container start is safe — not just the
+# very first one. `exec` hands off to gunicorn as PID 1 so it still
+# receives `docker stop`'s SIGTERM directly rather than the shell eating it.
+CMD ["sh", "-c", "python -m server.seed_plugins && exec gunicorn --bind 0.0.0.0:5000 server.app:create_app()"]

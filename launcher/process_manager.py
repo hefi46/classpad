@@ -32,6 +32,7 @@ KILL_LIST = [
     "wordprocessor",
     "cheese",
     "soffice.bin",  # `soffice` is a wrapper script that execs this; comm is the real binary
+    "luanti",  # Debian's current package/binary name for Minetest; comm confirmed on real hardware
 ]
 
 _current_process = None

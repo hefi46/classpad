@@ -473,3 +473,55 @@ def upsert_plugin(
         (plugin_id, name, version, type, description, zip_filename),
     )
     db.commit()
+
+
+def catalogue_is_empty() -> bool:
+    db = get_db()
+    return db.execute("SELECT COUNT(*) AS c FROM plugins").fetchone()["c"] == 0
+
+
+def seed_default_catalogue(entries: list[dict]) -> None:
+    """Populate a brand-new catalogue with the project's curated plugin set.
+
+    Called once from server/seed_plugins.py (run from the Docker CMD, before
+    gunicorn starts on every container start) — deliberately not wired into
+    init_db()/create_app() itself, since every test calls create_app()
+    against a fresh empty DB (tests/server/conftest.py) and would otherwise
+    get silently seeded too, changing what "empty catalogue" means
+    throughout the existing test suite.
+
+    A no-op unless the catalogue is genuinely empty (checked by the caller
+    via catalogue_is_empty(), not re-checked here, so a caller building
+    `entries` — which involves reading manifests and writing zips to
+    plugins_dir() — can skip that work entirely on the common case of an
+    already-seeded server, not just skip the DB write), so this never
+    overwrites an admin's already-customized catalogue: docker-compose.yml
+    has `restart: unless-stopped`, so the container (and this script) can
+    start many times against the same persistent /data volume, not just
+    once.
+
+    `entries` dicts carry id/name/version/type/description/zip_filename
+    (the same shape upsert_plugin takes) plus `enabled`/`position` — built
+    by the caller from each plugins/<id>/manifest.json. Unlike upsert_plugin,
+    this does set enabled/position, since every row here is a fresh INSERT
+    (never an update — the empty-catalogue precondition guarantees no
+    conflict), and the whole point of seeding is to land with a curated
+    default profile already in place, not an empty one.
+    """
+    db = get_db()
+    for e in entries:
+        db.execute(
+            "INSERT INTO plugins (id, name, version, type, description, "
+            "zip_filename, enabled, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                e["id"],
+                e["name"],
+                e["version"],
+                e["type"],
+                e["description"],
+                e["zip_filename"],
+                int(e["enabled"]),
+                e["position"],
+            ),
+        )
+    db.commit()

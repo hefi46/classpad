@@ -1,0 +1,9 @@
+{
+  "id": "luanti",
+  "name": "Luanti",
+  "version": "1.0.0",
+  "type": "app",
+  "launch_command": "/usr/games/luanti",
+  "icon": "icon.png",
+  "description": "Block-building sandbox game (formerly Minetest) — test tile, not yet vetted for classroom use"
+}
