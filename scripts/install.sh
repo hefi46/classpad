@@ -31,6 +31,22 @@ apt-get install -y \
     chromium git curl rsync xbindkeys x11-utils xdotool \
     alsa-utils network-manager fonts-quicksand
 
+# Binaries for the curated apps server/seed_plugins.py (2026-08-05) puts in
+# every fresh server's plugin catalogue — a seeded catalogue entry only
+# delivers the plugin bundle (manifest+icon) via plugin_deploy.py, not the
+# underlying program. Without this, enabling e.g. Writer on a freshly
+# imaged machine hits the exact "greyed out, package not installed" failure
+# found on real hardware building the Calc/Impress tiles (see CLAUDE.md).
+# gcompris-qt: trixie only ships the Qt/QML rewrite, not classic "gcompris"
+# (see the KILL_LIST comment in process_manager.py/recovery.sh for the same
+# correction). luanti-game-minetest: the default subgame — Luanti alone has
+# no content to play. Package names confirmed against a real Debian trixie
+# install, not assumed.
+apt-get install -y \
+    tuxpaint tuxtype tuxmath gcompris-qt cheese \
+    libreoffice-writer libreoffice-calc libreoffice-impress \
+    luanti luanti-game-minetest
+
 echo "== [2/13] Creating $KIOSK_USER user =="
 if ! id -u "$KIOSK_USER" >/dev/null 2>&1; then
     # Groups mirror what `adduser` grants a normal Debian desktop user by
