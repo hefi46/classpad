@@ -330,10 +330,14 @@ class _PollerHarness:
         self.status_file = tmp_path / "server_status"
         monkeypatch.setattr(config, "SERVER_STATUS_FILE", self.status_file)
         monkeypatch.setattr(config, "REFRESH_REQUEST_FILE", tmp_path / "refresh_requested")
+        self.lock_status_file = tmp_path / "lock_to_app"
+        monkeypatch.setattr(config, "LOCK_STATUS_FILE", self.lock_status_file)
         monkeypatch.setattr(process_manager, "ACTIVITY_FILE", str(tmp_path / "classpad_activity"))
         self.kill_all_calls = []
         monkeypatch.setattr(process_manager, "kill_all", lambda: self.kill_all_calls.append(True))
         self.update_queue = queue.Queue(maxsize=1)
+        self.background_queue = queue.Queue(maxsize=1)
+        self.lock_queue = queue.Queue(maxsize=1)
         self.stop_event = threading.Event()
 
     def run_briefly(self, local_plugins, monkeypatch, seconds=0.3):
@@ -341,7 +345,13 @@ class _PollerHarness:
         thread = threading.Thread(
             target=config.run_poller,
             args=(self.update_queue, self.stop_event),
-            kwargs=dict(poll_interval=0.05, telemetry_interval=0.05, tick=0.02),
+            kwargs=dict(
+                background_queue=self.background_queue,
+                lock_queue=self.lock_queue,
+                poll_interval=0.05,
+                telemetry_interval=0.05,
+                tick=0.02,
+            ),
             daemon=True,
         )
         thread.start()
@@ -516,3 +526,94 @@ def test_run_poller_refresh_request_forces_an_immediate_poll(monkeypatch, tmp_pa
     applied = update_queue.get_nowait()
     assert [p.id for p in applied] == ["plugin-0"]
     assert not refresh_file.exists()
+
+
+# --- lock-to-app ------------------------------------------------------------
+
+
+def test_apply_lock_pushes_to_queue_on_change():
+    lock_queue = queue.Queue(maxsize=1)
+    new_state = config._apply_lock({"lock_to_app": "tuxpaint"}, object(), lock_queue)
+    assert new_state == "tuxpaint"
+    assert lock_queue.get_nowait() == "tuxpaint"
+
+
+def test_apply_lock_skips_queue_push_when_unchanged():
+    lock_queue = queue.Queue(maxsize=1)
+    new_state = config._apply_lock({"lock_to_app": "tuxpaint"}, "tuxpaint", lock_queue)
+    assert new_state == "tuxpaint"
+    assert lock_queue.empty()
+
+
+def test_apply_lock_replaces_a_stale_unconsumed_update():
+    lock_queue = queue.Queue(maxsize=1)
+    config._apply_lock({"lock_to_app": "tuxpaint"}, object(), lock_queue)
+    config._apply_lock({"lock_to_app": "tuxmath"}, "tuxpaint", lock_queue)
+    assert lock_queue.get_nowait() == "tuxmath"
+    assert lock_queue.empty()
+
+
+def test_apply_lock_writes_status_file(tmp_path, monkeypatch):
+    status_file = tmp_path / "lock_to_app"
+    monkeypatch.setattr(config, "LOCK_STATUS_FILE", status_file)
+
+    config._apply_lock({"lock_to_app": "tuxpaint"}, object(), None)
+    assert status_file.read_text() == "tuxpaint"
+
+    config._apply_lock({"lock_to_app": None}, "tuxpaint", None)
+    assert not status_file.exists()
+
+
+def test_run_poller_pushes_lock_to_app_onto_queue(monkeypatch, poller_harness, stub_server):
+    stub_server.config_response = {
+        "machine_id": "11e-TEST", "plugins": [], "force_home": False, "lock_to_app": "tuxpaint",
+    }
+
+    poller_harness.run_briefly([], monkeypatch)
+
+    assert poller_harness.lock_queue.get_nowait() == "tuxpaint"
+    assert poller_harness.lock_status_file.read_text() == "tuxpaint"
+
+
+def test_run_poller_notifies_unlock_even_though_it_matches_the_sentinel_default(
+    monkeypatch, poller_harness, stub_server
+):
+    # Regression: last_lock_state used to start as None, which is also the
+    # real "not locked" value — a first poll landing on an already-unlocked
+    # server would look like "no change" and never reach the queue. Confirms
+    # the sentinel fix (object(), not None) in run_poller.
+    stub_server.config_response = {
+        "machine_id": "11e-TEST", "plugins": [], "force_home": False, "lock_to_app": None,
+    }
+
+    poller_harness.run_briefly([], monkeypatch)
+
+    assert poller_harness.lock_queue.get_nowait() is None
+
+
+def test_run_poller_falls_back_to_cached_lock_when_server_unreachable(monkeypatch, tmp_path):
+    monkeypatch.setattr(config, "SERVER_URL_FILE", tmp_path / "server_url")
+    monkeypatch.setenv(config.SERVER_URL_ENV_VAR, "http://127.0.0.1:1")
+    monkeypatch.setattr(config, "CONFIG_CACHE_FILE", tmp_path / "config_cache.json")
+    monkeypatch.setattr(config, "SERVER_STATUS_FILE", tmp_path / "server_status")
+    monkeypatch.setattr(config, "REFRESH_REQUEST_FILE", tmp_path / "refresh_requested")
+    monkeypatch.setattr(config, "LOCK_STATUS_FILE", tmp_path / "lock_to_app")
+    monkeypatch.setattr(process_manager, "ACTIVITY_FILE", str(tmp_path / "classpad_activity"))
+    config.save_cached_config({"machine_id": "11e-TEST", "plugins": [], "force_home": False, "lock_to_app": "tuxpaint"})
+    monkeypatch.setattr(config, "scan_plugins", lambda: [])
+
+    update_queue = queue.Queue(maxsize=1)
+    lock_queue = queue.Queue(maxsize=1)
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=config.run_poller,
+        args=(update_queue, stop_event),
+        kwargs=dict(lock_queue=lock_queue, poll_interval=0.05, telemetry_interval=0.05, tick=0.02),
+        daemon=True,
+    )
+    thread.start()
+    thread.join(timeout=0.3)
+    stop_event.set()
+    thread.join(timeout=1)
+
+    assert lock_queue.get_nowait() == "tuxpaint"

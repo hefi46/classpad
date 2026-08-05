@@ -404,3 +404,161 @@ def test_clear_background_image_falls_back_to_no_image(app, client):
     with app.app_context():
         assert models.get_settings()["background_image_filename"] is None
     assert not path.exists()
+
+
+def test_set_lock_to_app_requires_enabled_plugin(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+        models.set_profile(["tuxpaint"])
+
+    resp = client.post("/admin/lock-to-app", data={"csrf_token": csrf, "plugin_id": "tuxpaint"})
+    assert resp.status_code == 302
+    with app.app_context():
+        assert models.get_settings()["lock_to_app"] == "tuxpaint"
+
+
+def test_set_lock_to_app_rejects_disabled_plugin(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+    client.post("/admin/lock-to-app", data={"csrf_token": csrf, "plugin_id": "tuxpaint"})
+    with app.app_context():
+        assert models.get_settings()["lock_to_app"] is None
+
+
+def test_set_lock_to_app_rejects_nonexistent_plugin(app, client):
+    csrf = _login(client)
+    client.post("/admin/lock-to-app", data={"csrf_token": csrf, "plugin_id": "does-not-exist"})
+    with app.app_context():
+        assert models.get_settings()["lock_to_app"] is None
+
+
+def test_clear_lock_to_app(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+        models.set_profile(["tuxpaint"])
+    client.post("/admin/lock-to-app", data={"csrf_token": csrf, "plugin_id": "tuxpaint"})
+
+    client.post("/admin/lock-to-app/clear", data={"csrf_token": csrf})
+    with app.app_context():
+        assert models.get_settings()["lock_to_app"] is None
+
+
+def test_deleting_locked_website_plugin_also_clears_lock(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "phonics-site", name="Phonics Game", version="1.0.0", type="website",
+            description="d", zip_filename="phonics-site.zip",
+        )
+        models.set_profile(["phonics-site"])
+    client.post("/admin/lock-to-app", data={"csrf_token": csrf, "plugin_id": "phonics-site"})
+
+    client.post("/admin/plugins/phonics-site/delete", data={"csrf_token": csrf})
+    with app.app_context():
+        assert models.get_settings()["lock_to_app"] is None
+
+
+def test_machines_page_shows_no_lock_banner_when_unlocked(app, client):
+    _login(client)
+    page = client.get("/admin/machines")
+    assert b"lock-banner" not in page.data
+
+
+def test_machines_page_shows_lock_banner_with_plugin_name(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+        models.set_profile(["tuxpaint"])
+    client.post("/admin/lock-to-app", data={"csrf_token": csrf, "plugin_id": "tuxpaint"})
+
+    page = client.get("/admin/machines")
+    assert b"lock-banner" in page.data
+    assert b"TuxPaint" in page.data
+
+
+def test_machines_page_lock_banner_handles_deleted_locked_plugin(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "phonics-site", name="Phonics Game", version="1.0.0", type="website",
+            description="d", zip_filename="phonics-site.zip",
+        )
+        models.set_profile(["phonics-site"])
+        # Bypass the route's own guard (which clears the lock on delete) to
+        # exercise the banner's fallback for an id that no longer resolves
+        # to a real plugin — same defensive case the Config-page section
+        # already handles.
+        models.set_lock_to_app("phonics-site")
+        models.delete_plugin("phonics-site")
+
+    page = client.get("/admin/machines")
+    assert b"lock-banner" in page.data
+    assert b"phonics-site" in page.data
+    assert b"no longer exists" in page.data
+
+
+def test_unlock_from_machines_page_redirects_back_to_machines(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+        models.set_profile(["tuxpaint"])
+    client.post("/admin/lock-to-app", data={"csrf_token": csrf, "plugin_id": "tuxpaint"})
+
+    resp = client.post(
+        "/admin/lock-to-app/clear",
+        data={"csrf_token": csrf},
+        headers={"Referer": "http://localhost/admin/machines"},
+    )
+    assert resp.headers["Location"].endswith("/admin/machines")
+
+
+def test_unlock_from_config_page_redirects_back_to_config(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+        models.set_profile(["tuxpaint"])
+    client.post("/admin/lock-to-app", data={"csrf_token": csrf, "plugin_id": "tuxpaint"})
+
+    resp = client.post(
+        "/admin/lock-to-app/clear",
+        data={"csrf_token": csrf},
+        headers={"Referer": "http://localhost/admin/plugins"},
+    )
+    assert resp.headers["Location"].endswith("/admin/plugins")
+
+
+def test_disabling_locked_plugin_also_clears_lock(app, client):
+    csrf = _login(client)
+    with app.app_context():
+        models.upsert_plugin(
+            "tuxpaint", name="TuxPaint", version="1.0.0", type="app",
+            description="d", zip_filename="tuxpaint.zip",
+        )
+        models.set_profile(["tuxpaint"])
+    client.post("/admin/lock-to-app", data={"csrf_token": csrf, "plugin_id": "tuxpaint"})
+
+    client.post("/admin/plugins/tuxpaint/toggle", data={"csrf_token": csrf})
+    with app.app_context():
+        assert models.get_settings()["lock_to_app"] is None
+        assert models.get_plugin("tuxpaint").enabled is False

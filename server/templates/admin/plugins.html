@@ -103,6 +103,39 @@
 </section>
 
 <section class="config-section">
+  <h2 class="section-heading">Lock to App</h2>
+  <p class="section-sub">Puts every machine on a single app with no way back to the launcher grid — it relaunches automatically if a child closes it. Applies on next check-in, same as the rest of this page.</p>
+
+  {% if settings.lock_to_app %}
+  <div class="lock-active">
+    <p class="lock-active-label">
+      🔒 Locked to <strong>{{ locked_plugin.name if locked_plugin else settings.lock_to_app }}</strong>
+      {% if not locked_plugin %}<span class="lock-missing">— this plugin no longer exists; unlock below</span>{% endif %}
+    </p>
+    <form method="post" action="{{ url_for('admin.clear_lock_to_app') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="unlock-btn">Unlock</button>
+    </form>
+  </div>
+  {% else %}
+  <form method="post" action="{{ url_for('admin.set_lock_to_app') }}" class="lock-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>App
+      <select name="plugin_id" required {{ "disabled" if not enabled_plugins else "" }}>
+        {% for plugin in enabled_plugins %}
+        <option value="{{ plugin.id }}">{{ plugin.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="lock-btn" {{ "disabled" if not enabled_plugins else "" }}>Lock</button>
+  </form>
+  {% if not enabled_plugins %}
+  <p class="upload-help">Enable at least one plugin above before locking to it.</p>
+  {% endif %}
+  {% endif %}
+</section>
+
+<section class="config-section">
   <h2 class="section-heading">Background</h2>
   <p class="section-sub">Home screen appearance — applies to every machine on their next check-in.</p>
 

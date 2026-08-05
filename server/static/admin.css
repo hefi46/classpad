@@ -246,3 +246,45 @@ tr.is-disabled .plugin-name, tr.is-disabled .plugin-id { color: var(--text-muted
 }
 .theme-swatch-label { font-size: 0.75rem; color: var(--text-muted); }
 .background-current { margin-top: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem; }
+
+/* Warn (amber), not critical (red) or good (green) — this isn't an error
+   state and it isn't the routine "enabled" state either, it's a deliberate
+   but unusual override of normal operation. Distinct from the toggle-btn
+   green/red convention above on purpose. */
+.lock-active {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  flex-wrap: wrap; padding: 0.7rem 0.9rem;
+  background: var(--warn-soft); color: var(--warn); border-radius: 8px;
+}
+.lock-active-label { margin: 0; font-size: 0.875rem; }
+.lock-missing { font-size: 0.8125rem; }
+.unlock-btn, .lock-btn {
+  appearance: none; border: 1px solid var(--warn); background: var(--surface);
+  color: var(--warn); font-weight: 600; font-size: 0.8125rem;
+  padding: 0.4rem 0.7rem; border-radius: 6px; cursor: pointer; white-space: nowrap;
+}
+.unlock-btn:hover, .lock-btn:hover:not(:disabled) { background: var(--warn); color: var(--surface); }
+.lock-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.lock-form { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 0.9rem; }
+.lock-form label {
+  display: flex; flex-direction: column; gap: 0.3rem;
+  font-size: 0.8125rem; color: var(--text-muted);
+}
+.lock-form select {
+  padding: 0.45rem 0.6rem; border: 1px solid var(--border); border-radius: 5px;
+  background: var(--surface); color: var(--text); min-width: 12rem;
+}
+
+/* Full-width variant of .lock-active above, for the machines page — same
+   warn colours, more prominent placement (ahead of the view-head, not
+   tucked into a Config subsection) since the point here is "notice this
+   before you go looking for a machine that's misbehaving", not routine
+   status. */
+.lock-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  flex-wrap: wrap; padding: 0.75rem 1rem; margin-bottom: 1.25rem;
+  background: var(--warn-soft); color: var(--warn); border-radius: 8px;
+  border: 1px solid var(--warn);
+}
+.lock-banner-label { margin: 0; font-size: 0.9375rem; }
+.lock-banner .lock-missing { font-size: 0.8125rem; }

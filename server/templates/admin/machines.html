@@ -1,6 +1,19 @@
 {% extends "admin/base.html" %}
 {% block title %}Machines — Classpad Admin{% endblock %}
 {% block content %}
+{% if lock_id %}
+<div class="lock-banner">
+  <p class="lock-banner-label">
+    🔒 Every machine is locked to <strong>{{ locked_plugin.name if locked_plugin else lock_id }}</strong>
+    {% if not locked_plugin %}<span class="lock-missing">— this plugin no longer exists</span>{% endif %}
+    — the launcher grid isn't reachable until you unlock.
+  </p>
+  <form method="post" action="{{ url_for('admin.clear_lock_to_app') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="unlock-btn">Unlock</button>
+  </form>
+</div>
+{% endif %}
 <div class="view-head">
   <h1>Machines</h1>
   <p class="view-sub">{{ rows|length }} registered</p>

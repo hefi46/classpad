@@ -9,6 +9,7 @@ def test_unknown_machine_gets_empty_config(client):
         "plugins": [],
         "force_home": False,
         "background": {"color": "#DCEEF7", "image_version": None},
+        "lock_to_app": None,
     }
 
 
@@ -122,6 +123,22 @@ def test_display_name_surfaces_in_config_but_does_not_affect_plugins(app, client
     with app.app_context():
         machine = models.get_machine("11e-abc123")
     assert machine.display_name == "blue-3"
+
+
+def test_lock_to_app_surfaces_in_config(app, client):
+    with app.app_context():
+        models.set_lock_to_app("tuxpaint")
+
+    assert client.get("/config/11e-abc123").get_json()["lock_to_app"] == "tuxpaint"
+
+
+def test_lock_to_app_is_shared_across_machines(app, client):
+    with app.app_context():
+        models.set_lock_to_app("tuxpaint")
+
+    data_a = client.get("/config/11e-aaa111").get_json()
+    data_b = client.get("/config/11e-bbb222").get_json()
+    assert data_a["lock_to_app"] == data_b["lock_to_app"] == "tuxpaint"
 
 
 def test_force_home_flag_surfaces_in_config(app, client):

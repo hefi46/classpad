@@ -118,7 +118,11 @@ def _machine_status(machine: models.Machine) -> str:
 @login_required
 def machines():
     rows = [(m, _machine_status(m)) for m in models.list_machines()]
-    return render_template("admin/machines.html", rows=rows)
+    lock_id = models.get_settings()["lock_to_app"]
+    locked_plugin = models.get_plugin(lock_id) if lock_id else None
+    return render_template(
+        "admin/machines.html", rows=rows, lock_id=lock_id, locked_plugin=locked_plugin
+    )
 
 
 @bp.route("/machines/<machine_id>/display-name", methods=["POST"])
@@ -145,12 +149,18 @@ def plugins():
     all_plugins = models.list_plugins()
     enabled = sorted((p for p in all_plugins if p.enabled), key=lambda p: p.position)
     disabled = sorted((p for p in all_plugins if not p.enabled), key=lambda p: p.name)
+    settings = models.get_settings()
+    locked_plugin = (
+        models.get_plugin(settings["lock_to_app"]) if settings["lock_to_app"] else None
+    )
     return render_template(
         "admin/plugins.html",
         plugins=enabled + disabled,
+        enabled_plugins=enabled,
         enabled_count=len(enabled),
-        settings=models.get_settings(),
+        settings=settings,
         background_themes=models.BACKGROUND_THEMES,
+        locked_plugin=locked_plugin,
     )
 
 
@@ -158,7 +168,14 @@ def plugins():
 @login_required
 def toggle_plugin(plugin_id):
     _check_csrf()
+    was_locked = models.get_settings()["lock_to_app"] == plugin_id
     models.toggle_plugin_enabled(plugin_id)
+    if was_locked:
+        # Only reachable going enabled -> disabled: set_lock_to_app only
+        # ever accepts an already-enabled id, so a locked plugin can't have
+        # gotten here already disabled.
+        models.set_lock_to_app(None)
+        flash("Disabling the locked app also cleared the lock.")
     return redirect(url_for("admin.plugins"))
 
 
@@ -191,10 +208,15 @@ def delete_plugin(plugin_id):
         flash("Only website tiles can be deleted.")
         return redirect(url_for("admin.plugins"))
 
+    was_locked = models.get_settings()["lock_to_app"] == plugin_id
     zip_filename = models.delete_plugin(plugin_id)
     if zip_filename:
         (models.plugins_dir() / zip_filename).unlink(missing_ok=True)
-    flash(f"Deleted '{plugin.name}'.")
+    if was_locked:
+        models.set_lock_to_app(None)
+        flash(f"Deleted '{plugin.name}' — it was the locked app, so the lock was cleared too.")
+    else:
+        flash(f"Deleted '{plugin.name}'.")
     return redirect(url_for("admin.plugins"))
 
 
@@ -407,4 +429,48 @@ def clear_background_image():
     if old_filename:
         (models.background_dir() / old_filename).unlink(missing_ok=True)
     flash("Background artwork removed — machines fall back to the solid colour.")
+    return redirect(url_for("admin.plugins"))
+
+
+@bp.route("/lock-to-app", methods=["POST"])
+@login_required
+def set_lock_to_app():
+    """Global, all-machines lock — see models.set_lock_to_app. Only an
+    *enabled* plugin can be picked (the dropdown this form submits only
+    ever lists enabled ones — see plugins.html — but the id is re-checked
+    here too, same "never trust the form value alone" rule as
+    set_background_color's theme lookup): locking to something not in the
+    shared profile would put every machine on an app nothing else in the
+    admin UI treats as active.
+    """
+    _check_csrf()
+    plugin_id = request.form.get("plugin_id", "")
+    plugin = models.get_plugin(plugin_id)
+    if plugin is None or not plugin.enabled:
+        flash("Choose one of the enabled plugins to lock to.")
+        return redirect(url_for("admin.plugins"))
+    models.set_lock_to_app(plugin_id)
+    flash(
+        f"Locked every machine to '{plugin.name}' — it relaunches automatically if closed, "
+        "until you unlock below."
+    )
+    return redirect(url_for("admin.plugins"))
+
+
+@bp.route("/lock-to-app/clear", methods=["POST"])
+@login_required
+def clear_lock_to_app():
+    """Reachable from two places now: the Config page's own Lock to App
+    section, and the machines-page warning banner's quick-unlock link (see
+    machines.html). Bounces back to whichever one submitted the form
+    (checked against referrer, not trusted as a redirect target string)
+    rather than always landing on Config, so unlocking from the banner
+    doesn't yank the admin away from the machine roster they were looking
+    at.
+    """
+    _check_csrf()
+    models.set_lock_to_app(None)
+    flash("Unlocked — machines return to the normal launcher on their next check-in.")
+    if request.referrer and request.referrer.rstrip("/").endswith(url_for("admin.machines")):
+        return redirect(url_for("admin.machines"))
     return redirect(url_for("admin.plugins"))

@@ -62,9 +62,23 @@ CREATE TABLE IF NOT EXISTS plugins (
 CREATE TABLE IF NOT EXISTS settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
     background_color TEXT NOT NULL DEFAULT '#DCEEF7',
-    background_image_filename TEXT
+    background_image_filename TEXT,
+    lock_to_app TEXT
 );
 """
+
+# `lock_to_app` was added to `settings` after `CREATE TABLE IF NOT EXISTS`
+# above had already shipped to a real deployed server (see CLAUDE.md's
+# "Server host bring-up" notes) — that server's `settings` table already
+# exists on disk without the column, and `IF NOT EXISTS` is a no-op against
+# it, so a plain ALTER TABLE is needed on top. Same idempotent-migration
+# shape either way: check first, only alter if missing, so this is also a
+# genuine no-op against a schema that already has the column (every fresh
+# `CREATE TABLE` from here on already includes it).
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, coltype: str) -> None:
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in existing:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
 
 # Curated background themes (2026-08-03 redesign) — replaces a freeform hex
 # colour picker in the admin portal. A raw <input type="color"> let an admin
@@ -109,6 +123,7 @@ def init_db(db_path: Path) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.executescript(SCHEMA)
+        _ensure_column(conn, "settings", "lock_to_app", "TEXT")
         conn.execute("INSERT OR IGNORE INTO settings (id) VALUES (1)")
         conn.commit()
     finally:
@@ -250,11 +265,12 @@ def set_force_home(machine_id: str, value: bool) -> None:
 def get_settings() -> dict:
     db = get_db()
     row = db.execute(
-        "SELECT background_color, background_image_filename FROM settings WHERE id = 1"
+        "SELECT background_color, background_image_filename, lock_to_app FROM settings WHERE id = 1"
     ).fetchone()
     return {
         "background_color": row["background_color"],
         "background_image_filename": row["background_image_filename"],
+        "lock_to_app": row["lock_to_app"],
     }
 
 
@@ -269,6 +285,18 @@ def set_background_image(filename: str | None) -> None:
     db.execute(
         "UPDATE settings SET background_image_filename = ? WHERE id = 1", (filename,)
     )
+    db.commit()
+
+
+def set_lock_to_app(plugin_id: str | None) -> None:
+    """Global, same "one shared profile" philosophy as background/plugins —
+    there is no per-machine lock, `plugin_id=None` clears it. The caller
+    (admin.py) is responsible for only ever passing an id that's currently
+    an enabled catalogue entry; this layer doesn't validate that itself
+    (same division of responsibility as set_profile/toggle_plugin_enabled
+    below, which don't validate ids either)."""
+    db = get_db()
+    db.execute("UPDATE settings SET lock_to_app = ? WHERE id = 1", (plugin_id,))
     db.commit()
 
 
@@ -290,6 +318,17 @@ def get_config(machine_id: str) -> dict:
     same schedule. `image_version` is just the stored filename itself (it
     changes on every upload, see admin.py's upload_background_image) — good
     enough as a change marker without a separate version column.
+
+    `lock_to_app` is the same global-settings pattern again — every machine
+    gets the identical value, "locks all devices" per the feature's own
+    framing, not a per-machine flag like force_home. Just the plugin id (or
+    null); the client already has full manifest detail for anything
+    installed locally, same reasoning as the `plugins` list above. Worth
+    noting this id is deliberately *not* filtered against the `plugins`
+    list above (which only carries enabled ones) — if an admin disables the
+    locked plugin without clearing the lock first, the client still needs
+    to see which id it's supposed to be locked to in order to detect that
+    it's no longer resolvable and fall back safely (see launcher/main.py).
     """
     upsert_machine(machine_id)
     db = get_db()
@@ -300,7 +339,7 @@ def get_config(machine_id: str) -> dict:
         "SELECT id, version FROM plugins WHERE enabled = 1 ORDER BY position"
     ).fetchall()
     settings_row = db.execute(
-        "SELECT background_color, background_image_filename FROM settings WHERE id = 1"
+        "SELECT background_color, background_image_filename, lock_to_app FROM settings WHERE id = 1"
     ).fetchone()
     return {
         "machine_id": machine_id,
@@ -311,6 +350,7 @@ def get_config(machine_id: str) -> dict:
             "color": settings_row["background_color"],
             "image_version": settings_row["background_image_filename"],
         },
+        "lock_to_app": settings_row["lock_to_app"],
     }
 
 

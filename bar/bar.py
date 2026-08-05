@@ -548,6 +548,7 @@ class Bar(Gtk.Window):
 
         GLib.timeout_add(1000, self._tick_clock)
         GLib.timeout_add(1000, self._tick_activity)
+        GLib.timeout_add(1000, self._tick_lock)
         GLib.timeout_add(WIFI_POLL_INTERVAL_MS, self._tick_wifi)
         self._tick_wifi()  # first update immediately, not 5s after startup
         GLib.timeout_add(BATTERY_POLL_INTERVAL_MS, self._tick_battery)
@@ -571,9 +572,9 @@ class Bar(Gtk.Window):
         row.set_margin_end(10)
         overlay.add(row)
 
-        home_button = make_icon_button(draw_home_icon, HOME_ICON_SIZE, "Home")
-        home_button.connect("clicked", self._on_home_clicked)
-        row.pack_start(home_button, False, False, 0)
+        self.home_button = make_icon_button(draw_home_icon, HOME_ICON_SIZE, "Home")
+        self.home_button.connect("clicked", self._on_home_clicked)
+        row.pack_start(self.home_button, False, False, 0)
 
         self.activity_label = Gtk.Label(label="")
         self.activity_label.get_style_context().add_class("classpad-activity")
@@ -642,6 +643,25 @@ class Bar(Gtk.Window):
         except FileNotFoundError:
             activity = ""
         self.activity_label.set_text(activity)
+        return True
+
+    def _tick_lock(self):
+        # Same read-a-flat-file convention as _tick_activity — see
+        # launcher_config.LOCK_STATUS_FILE. Home doesn't lead anywhere
+        # useful while every machine is locked to one app (quitting or
+        # Home-killing it just relaunches it, see launcher/main.py), so a
+        # live-looking clickable Home button would be misleading; grey it
+        # out instead, same "disabled at a boundary" treatment pager.py
+        # already gives its arrow buttons.
+        try:
+            with open(launcher_config.LOCK_STATUS_FILE) as f:
+                locked = bool(f.read().strip())
+        except FileNotFoundError:
+            locked = False
+        self.home_button.set_sensitive(not locked)
+        self.home_button.set_tooltip_text(
+            "Locked to one app by the admin — Home is disabled" if locked else "Home"
+        )
         return True
 
     def _tick_wifi(self):

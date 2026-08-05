@@ -1,16 +1,19 @@
+import math
 import os
 import queue
+import sys
 import threading
 from pathlib import Path
 
 import pygame
 
 from launcher import process_manager
-from launcher.button import Button
+from launcher.button import DESC_COLOR, FONT_NAME, INK, TILE_COLOR, Button
 from launcher.config import (
     BACKGROUND_IMAGE_CACHE,
     DEFAULT_BACKGROUND_COLOR,
     build_button_grid,
+    get_server_url,
     load_cached_config,
     page_count,
     run_poller,
@@ -50,6 +53,91 @@ def _load_background_image(width, height):
     return pygame.transform.smoothscale(image, (width, height))
 
 
+def _resolve_lock(plugins, lock_id):
+    """Look up the "lock to app" id (server-controlled, see config.py's
+    _apply_lock) against what's actually installed locally.
+
+    Deliberately returns None — falling back to the normal grid — rather
+    than raising or freezing on an unresolvable id (admin locked to
+    something not yet deployed to this machine, a stale id after a
+    deletion, etc.): same "never leave a 5-6 year old stuck on a broken
+    screen" reasoning as reconcile_plugins' empty-result handling in
+    config.py. A lock that can't be honoured degrades to "just show the
+    launcher", not a blank/frozen kiosk.
+    """
+    if not lock_id:
+        return None
+    for plugin in plugins:
+        if plugin.id == lock_id:
+            return plugin
+    print(
+        f"warning: locked to {lock_id!r} but it isn't installed locally — showing the normal grid instead",
+        file=sys.stderr,
+    )
+    return None
+
+
+# Sage accent — same #7CA79C used elsewhere (pager.py's ARROW_BG,
+# button.py's hover fill family) for anything that needs to read as "calm
+# highlight", not imported directly since pager.py's name is specific to
+# arrows and would be a misleading name for this unrelated icon.
+LOCK_ICON_COLOR = (124, 167, 156)
+LOCK_HEADING_SIZE = 46
+LOCK_BODY_SIZE = 26
+LOCK_MUTED_SIZE = 20
+
+
+def _draw_lock_icon(surface, center, size, color):
+    """A plain hand-drawn padlock (rect body + arc shackle) rather than an
+    emoji glyph — Quicksand doesn't cover that Unicode range (same reason
+    bar.py hand-draws its home/speaker/battery icons instead of relying on
+    font glyph coverage; see CLAUDE.md's "Launcher visual design").
+    """
+    body_size = int(size * 0.8)
+    body_rect = pygame.Rect(0, 0, body_size, int(body_size * 0.75))
+    body_rect.center = (center[0], center[1] + int(size * 0.12))
+    pygame.draw.rect(surface, color, body_rect, border_radius=int(body_size * 0.15))
+
+    shackle_rect = pygame.Rect(0, 0, int(size * 0.6), int(size * 0.6))
+    shackle_rect.center = (center[0], body_rect.top)
+    pygame.draw.arc(surface, color, shackle_rect, 0, math.pi, width=max(4, size // 9))
+
+
+def _draw_lock_screen(screen, width, height, plugin_name, admin_url):
+    """Full-screen "locked" message for the gap between the locked app
+    closing and the relaunch actually covering the screen again.
+
+    Without this, that gap just shows whatever pygame last drew — the grid,
+    or nothing at first boot — which reads as a glitch, not the deliberate
+    "you're locked, ask an admin" state it actually is. One render+flip,
+    not a loop: this content just sits on screen untouched (nothing else is
+    drawing) until the relaunching app's own window maps over it, so
+    there's nothing to animate — same "cheap, not continuously redrawn"
+    bias as the rest of this file's rendering.
+    """
+    screen.fill(TILE_COLOR)
+    center_x = width // 2
+
+    _draw_lock_icon(screen, (center_x, height // 2 - 130), 90, LOCK_ICON_COLOR)
+
+    heading_font = pygame.font.SysFont(FONT_NAME, LOCK_HEADING_SIZE, bold=True)
+    body_font = pygame.font.SysFont(FONT_NAME, LOCK_BODY_SIZE)
+    muted_font = pygame.font.SysFont(FONT_NAME, LOCK_MUTED_SIZE)
+
+    lines = [
+        (heading_font, f"Locked to {plugin_name}", INK, height // 2 - 20),
+        (body_font, "Ask an admin to unlock it from the admin portal:", INK, height // 2 + 38),
+        (body_font, admin_url, LOCK_ICON_COLOR, height // 2 + 76),
+        (muted_font, "Reloading…", DESC_COLOR, height // 2 + 130),
+    ]
+    for font, text, color, y in lines:
+        text_surface = font.render(text, True, color)
+        rect = text_surface.get_rect(center=(center_x, y))
+        screen.blit(text_surface, rect)
+
+    pygame.display.flip()
+
+
 def main():
     os.environ.setdefault("SDL_VIDEO_WINDOW_POS", f"0,{BAR_HEIGHT}")
 
@@ -84,6 +172,13 @@ def main():
     )
 
     plugins = scan_plugins()
+
+    # Same "apply the cache immediately, don't wait for the first poll"
+    # reasoning as background above — a machine that reboots mid-lock
+    # should come back locked straight away, not show the grid for ~30s.
+    cached_lock_id = (load_cached_config() or {}).get("lock_to_app")
+    locked_plugin = _resolve_lock(plugins, cached_lock_id)
+
     pager = Pager()
     pager.set_page_count(page_count(len(plugins), screen_width, window_height))
     pager.layout(screen_width, window_height)
@@ -101,11 +196,12 @@ def main():
     # to turn into Buttons when convenient.
     update_queue = queue.Queue(maxsize=1)
     background_queue = queue.Queue(maxsize=1)
+    lock_queue = queue.Queue(maxsize=1)
     poller_stop = threading.Event()
     poller_thread = threading.Thread(
         target=run_poller,
         args=(update_queue, poller_stop),
-        kwargs={"background_queue": background_queue},
+        kwargs={"background_queue": background_queue, "lock_queue": lock_queue},
         daemon=True,
     )
     poller_thread.start()
@@ -115,6 +211,33 @@ def main():
     transition = None  # None when idle, else {"from", "to", "direction", "start"}
 
     while running:
+        if locked_plugin is not None:
+            # Still pump QUIT (session/systemd shutdown) even though we skip
+            # the rest of the normal event loop — everything else (clicks,
+            # the pager, hover) is meaningless while there's no grid to show.
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+            if not running:
+                break
+            _draw_lock_screen(
+                screen, screen_width, window_height, locked_plugin.name, f"{get_server_url()}/admin"
+            )
+            process = process_manager.launch(locked_plugin)
+            process_manager.wait_for_exit(process)
+            pygame.event.clear()  # same stale-click reason as the normal launch path below
+            # The only point a newly-cleared (or newly-changed) lock can take
+            # effect — matches the rest of this project's "reconcile only at
+            # natural boundaries" rule (config.py never interrupts a running
+            # child for a plugin/background update either).
+            try:
+                new_lock_id = lock_queue.get_nowait()
+            except queue.Empty:
+                pass
+            else:
+                locked_plugin = _resolve_lock(plugins, new_lock_id)
+            continue
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -179,6 +302,20 @@ def main():
                 if background_update["has_image"]
                 else None
             )
+
+        try:
+            new_lock_id = lock_queue.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            locked_plugin = _resolve_lock(plugins, new_lock_id)
+            if locked_plugin is not None:
+                # Admin just turned lock mode on while we were sitting on
+                # the grid — hand off to the lock branch immediately rather
+                # than waiting for a click. Skip this frame's render; the
+                # lock branch takes over next iteration.
+                transition = None
+                continue
 
         if background_image is not None:
             screen.blit(background_image, (0, 0))

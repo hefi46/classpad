@@ -56,6 +56,13 @@ BACKGROUND_IMAGE_CACHE = Path("/opt/classpad/background_image.png")
 # convention as process_manager.ACTIVITY_FILE rather than adding real IPC.
 SERVER_STATUS_FILE = Path("/tmp/classpad_server_status")
 REFRESH_REQUEST_FILE = Path("/tmp/classpad_refresh_requested")
+# Same convention again — bar.py greys out the Home button while this file
+# is present (see bar.py's _tick_lock), since Home doesn't lead anywhere
+# useful while every machine is locked to one app: quitting or Home-killing
+# it just relaunches it (see main.py), so a live, clickable-looking Home
+# button would be misleading. Content is just the locked plugin id, purely
+# informational — bar.py only cares whether the file exists.
+LOCK_STATUS_FILE = Path("/tmp/classpad_lock_to_app")
 
 POLL_INTERVAL_SECONDS = 30
 TELEMETRY_INTERVAL_SECONDS = 300
@@ -327,10 +334,47 @@ def _apply_background(response, last_state, background_queue, server_url):
     return state
 
 
+def _write_lock_status(plugin_id):
+    # Same stray-owner/PermissionError risk as _write_server_status above,
+    # same fix: best-effort, never take the poller thread down over it.
+    try:
+        if plugin_id:
+            LOCK_STATUS_FILE.write_text(plugin_id)
+        elif LOCK_STATUS_FILE.exists():
+            LOCK_STATUS_FILE.unlink()
+    except OSError as e:
+        print(f"warning: failed to write lock status: {e}", file=sys.stderr)
+
+
+def _apply_lock(response, last_state, lock_queue):
+    """Detect a lock_to_app change and hand the new value (a plugin id, or
+    None) to main.py via lock_queue — same maxsize=1 handoff convention as
+    update_queue/background_queue. Unlike those two, there's no local
+    "does this resolve to something installed" check here: main.py does
+    that itself (it needs to re-check it anyway every time a locked app
+    exits, not just when a new value arrives), so this stays a dumb
+    pass-through of whatever the server said, mirrored to LOCK_STATUS_FILE
+    unconditionally (not just on change) since bar.py has no queue access
+    and just wants the current value whenever it happens to poll.
+    """
+    lock_id = response.get("lock_to_app")
+    _write_lock_status(lock_id)
+    if lock_id == last_state:
+        return last_state
+    if lock_queue is not None:
+        try:
+            lock_queue.get_nowait()
+        except queue.Empty:
+            pass
+        lock_queue.put_nowait(lock_id)
+    return lock_id
+
+
 def run_poller(
     update_queue,
     stop_event,
     background_queue=None,
+    lock_queue=None,
     poll_interval=POLL_INTERVAL_SECONDS,
     telemetry_interval=TELEMETRY_INTERVAL_SECONDS,
     tick=POLLER_TICK_SECONDS,
@@ -348,6 +392,13 @@ def run_poller(
     last_activity_sent = object()  # sentinel, guaranteed != any real activity value
     last_applied_ids = None
     last_background_state = None
+    # object(), not None — None is a legitimate real value here ("not
+    # locked"), same reasoning as last_activity_sent's sentinel above. If
+    # this started as None, a machine booting with a stale "locked" cache
+    # whose first live poll finds the server already unlocked would compare
+    # None == None, look like "no change", and never push the unlock onto
+    # lock_queue — main.py would stay stuck relaunching the cached app.
+    last_lock_state = object()
 
     while not stop_event.is_set():
         server_url = get_server_url()
@@ -368,6 +419,7 @@ def run_poller(
                 last_background_state = _apply_background(
                     response, last_background_state, background_queue, server_url
                 )
+                last_lock_state = _apply_lock(response, last_lock_state, lock_queue)
                 if response.get("force_home"):
                     # process_manager.kill_all() has the exact same effect as
                     # scripts/recovery.sh (both are kept in sync against the
@@ -401,6 +453,7 @@ def run_poller(
                     last_background_state = _apply_background(
                         cached, last_background_state, background_queue, server_url
                     )
+                    last_lock_state = _apply_lock(cached, last_lock_state, lock_queue)
 
         current_activity = _read_current_activity()
         if server_url and (now - last_telemetry >= telemetry_interval or current_activity != last_activity_sent):
