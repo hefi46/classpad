@@ -1,3 +1,12 @@
 Flask
 gunicorn
+# server/routes/admin.py imports launcher.plugin_manager to reuse its
+# manifest-validation logic (one schema, one validator, shared with the
+# client's local scan). plugin_manager.py does `import pygame` at module
+# level (added 2026-08-03, so validate_manifest() can decode-check plugin
+# icons) — the server image needs it too, even though the server itself
+# never opens a display. Manylinux wheels bundle SDL2, so no extra apt
+# packages are needed for `import pygame` alone (no pygame.init()/display
+# mode is ever set server-side). server/seed_plugins.py (2026-08-05) relies
+# on the same import chain.
 pygame
