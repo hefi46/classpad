@@ -26,4 +26,8 @@ EXPOSE 5000
 # rows), so running it on every container start is safe — not just the
 # very first one. `exec` hands off to gunicorn as PID 1 so it still
 # receives `docker stop`'s SIGTERM directly rather than the shell eating it.
-CMD ["sh", "-c", "python -m server.seed_plugins && exec gunicorn --bind 0.0.0.0:5000 server.app:create_app()"]
+# The factory string is single-quoted — found on real hardware: unquoted,
+# sh (dash in this slim image, not bash) parses the bare `()` in
+# `server.app:create_app()` as a subshell and fails with a syntax error
+# before gunicorn ever starts.
+CMD ["sh", "-c", "python -m server.seed_plugins && exec gunicorn --bind 0.0.0.0:5000 'server.app:create_app()'"]
