@@ -299,9 +299,14 @@ the launcher's own window/mixer pattern.
 
 ## Phase 16: Imaging & Deployment
 
-- [ ] Document the full base image build process in `scripts/image-setup.sh`
-- [ ] Test imaging one machine from scratch using Clonezilla or `dd`
-- [ ] Verify: new machine boots, sets its own hostname from serial number, connects to WiFi, registers with server, downloads assigned plugins
+**Approach decided 2026-08-06: preseed-based USB provisioning, not golden-image/Clonezilla/`dd`.** See CLAUDE.md's "Provisioning / Imaging" section for the full design (`preseeds/classpad/preseed.cfg`, `scripts/build-provisioning-iso.sh`, `scripts/wifi-setup-interactive.sh`). Superseded, not just deferred — the items below replace the old Clonezilla/`dd` line rather than sitting alongside it.
+
+- [x] Decide imaging/cloning strategy — preseed USB, built and documented 2026-08-06 (was the open item in `pre-build-decisions.md` §1)
+- [ ] `scripts/build-provisioning-iso.sh` has not yet been run end-to-end (needs `xorriso`/`isolinux` + a real AARNet fetch) — do this before relying on it
+- [ ] Test imaging one machine from scratch using the built ISO on real 11e hardware
+- [ ] Verify on real hardware: `nmtui` (run as root, first-boot WiFi gate) creates a system-wide connection profile, not a session-scoped one — flagged as unverified in `scripts/wifi-setup-interactive.sh`
+- [ ] Verify: new machine boots, sets its own hostname from serial number, connects to WiFi (via the first-boot gate), registers with server, downloads assigned plugins
+- [ ] Generate a real crypted password for `preseeds/classpad/preseed.cfg`'s `sysadmin` account (`mkpasswd -m sha-512`) before building an ISO for actual use — the checked-in value is a non-functional placeholder
 - [ ] Document the teacher onboarding process (add machine to server, assign plugins)
 
 ---

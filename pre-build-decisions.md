@@ -12,7 +12,7 @@
 - [x] Python version — 3.11+ (CLAUDE.md)
 - [x] Auto-login display manager — LightDM confirmed (CLAUDE.md, TODO Phase 11)
 - [ ] Single OS image for all machines, or per-machine variants? — still open
-- [ ] Imaging/cloning strategy — TODO Phase 16 mentions Clonezilla/`dd` but the choice isn't finalised
+- [x] Imaging/cloning strategy — **RESOLVED 2026-08-06**, preseed-based USB provisioning (not Clonezilla/`dd`). See CLAUDE.md "Provisioning / Imaging" and TODO Phase 16.
 
 ---
 

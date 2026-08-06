@@ -174,6 +174,16 @@ Note `recovery.sh` sends `SIGKILL` (`pkill -9`), not the default `SIGTERM` — c
 
 Process kill list: `chromium`, `tuxpaint`, `tuxtype`, `tuxmath`, `gcompris-qt`, `xylophone`, plus any processes launched from plugin install.sh scripts. (Corrected from `gcompris` — Debian trixie only ships the Qt/QML rewrite, `gcompris-qt`; the classic GTK `gcompris` package no longer exists.) Each plugin manifest that spawns a long-running process outside `launch_command` itself (e.g. a bundled local server) must declare its process name explicitly — the kill list cannot infer names for arbitrary future plugins. **Found on real hardware (2026-07-31), building the Xylophone plugin (Phase 14):** any `custom`-type plugin invoked as `python3 <script>` shows up in `ps`/`pkill` as `python3` — indistinguishable from the launcher's and bar's own processes (both are also literally `python3`), so it can't just be added to the kill list by its interpreter name without also matching (and killing) the launcher/bar. `plugins/xylophone/app/xylophone.py` renames itself via `ctypes`/`prctl(PR_SET_NAME)` at startup so it gets its own kill-list entry (`xylophone`) instead. Any future Python-based `custom` plugin needs the same treatment.
 
+### Provisioning / Imaging
+**Preseed-based USB provisioning, added 2026-08-06 — supersedes the golden-image/`dd` approach TODO.md's Phase 16 originally sketched.** A raw whole-disk clone was never actually built; this is the decided replacement, not a fix to one. Uses [debian-preseed-iso-generator](https://github.com/bergmann-max/debian-preseed-iso-generator) (vendored unmodified into `scripts/vendor/` — not checked in, `git clone`d on demand by `scripts/build-provisioning-iso.sh`, gitignored, so it tracks upstream by re-cloning rather than by hand-merging patches).
+
+- **`preseeds/classpad/preseed.cfg`** drives the Debian installer itself: locale/AU timezone, wired-DHCP `netcfg` (see below for why not WiFi), the **AARNet mirror** pinned explicitly (`mirror.aarnet.edu.au`, both the main and `-security` paths) rather than relying on `deb.debian.org`'s geoip redirect, whole-disk guided partitioning (no LVM — single-purpose kiosk boxes, no resize/snapshot need), and a sudo `sysadmin` account with root login disabled (the crypted password in the checked-in file is a **deliberate non-functional placeholder** — `mkpasswd -m sha-512` before building a real ISO). `d-i pkgsel` stays deliberately minimal (`tasksel standard` + `openssh-server` only) — every classpad-specific package is `scripts/install.sh`'s job via `apt-get`, same as a manually-provisioned machine, so this file never needs editing when the package list changes.
+- **Offline-first is the whole point, not an incidental property.** `preseed/late_command` runs `scripts/install.sh` from a copy of this repo bundled directly on the install medium (`/cdrom/classpad-src`, injected by the build script below) — never fetched from `classpad-admin` or GitHub during provisioning. This mirrors the same "server enhances, doesn't gate" principle the running client already lives by (poller falls back to cache, grid is never blanked because the server's unreachable) — extended to provisioning time. AARNet is still needed during the d-i stage itself for base Debian packages (that's unavoidable with a netinst image), but that's a different, one-off network need from "can this become a working classpad machine," which now has zero dependency on the server being up. Once the machine *is* provisioned, `classpad-plugin-deploy.timer` (Phase 10, already existed) reconciles the bundled repo's plugin set against the live catalogue on its own schedule — so a USB built weeks ago still ends up current, it just doesn't need to be to finish provisioning.
+- **`scripts/build-provisioning-iso.sh`** builds the actual bootable image: runs the vendored generator (untouched) to produce a preseeded netinst ISO, then does its own second `xorriso` extract → inject → repack pass — the generator has no "extra files" option, and this avoids forking it. Injects `git archive HEAD` (the committed state at build time, not the working tree — warns loudly if there are uncommitted changes) as `/classpad-src` on the disc, regenerates `md5sum.txt`, and re-spins the ISO with the same BIOS+UEFI hybrid `xorriso -as mkisofs` invocation the generator itself uses. amd64-only (the only arch this project targets) — the generator's arm64 branch isn't replicated.
+- **Assumes wired Ethernet + DHCP on the imaging bench** (confirmed for this deployment) — d-i's own network stage only ever needs to reach AARNet, and WPA2-Enterprise/PEAP inside the installer environment (`netcfg`) is genuinely fragile and poorly documented, so it's deliberately kept out of d-i entirely. The classroom's actual WiFi is a first-boot concern instead — see below.
+- **First-boot interactive WiFi setup** (`scripts/wifi-setup-interactive.sh`, `system/systemd/classpad-wifi-setup.service` + a `lightdm.service.d` drop-in, both installed by `install.sh`'s own new step). Runs once, on the real console (`tty1`), before `lightdm` starts (the drop-in makes `lightdm.service` `Requires=`/`After=` the wifi unit — `Before=` alone only orders, it doesn't pull in a dependency). Covers the gap `install.sh`'s existing non-interactive, env-var-driven WiFi step (`CLASSPAD_WIFI_SSID`/...) can't: a machine imaged on the bench doesn't know the classroom's actual credentials yet, so whoever physically carries it in needs to enter them once. Gated on **actual reachability** (a direct probe of `classpad-admin`, not nmcli's own connectivity check, which depends on a connectivity URL that isn't guaranteed configured) rather than on a specific connection name — install.sh's own idempotency check cares about exact-name matching for its own re-run safety, but this gate only cares whether there's a route to the world right now, from any connection. Skips instantly (no prompt) if already reachable, e.g. a wired bench link. Uses `nmtui edit` (ships with `network-manager`, already a dependency — nothing new to build) rather than a bespoke wizard. **Only ever gates the first boot** — once its marker file exists it's never re-checked, even if WiFi later breaks (rotated password, etc.); deliberate, matching the rest of this project's "never leave the kid stuck, run off local cache" philosophy rather than hanging boot on a console prompt nobody's there to answer.
+- **Not yet verified on real hardware:** whether a root-run `nmtui` creates a system-wide connection profile (available at the LightDM greeter before autologin, same as `install.sh`'s own `nmcli` block explicitly sets via `connection.permissions ""`) or a session-scoped one. Flagged inline in `wifi-setup-interactive.sh` — if it turns out scoped, add an explicit `nmcli connection modify <name> connection.permissions ""` after `nmtui` exits. Also not yet verified: an actual end-to-end build-and-boot of an ISO (needs `xorriso`/`isolinux` and a real AARNet fetch) — only syntax-checked and traced against the generator's real source so far.
+
 ---
 
 ## Open Risks — Verify Before Building Further
@@ -185,6 +195,7 @@ Gated verification steps live in `TODO.md` Phase 2. Two of the three original ri
 - **Chromium F11 fullscreen-escape — RESOLVED, verified working.** Confirmed on real hardware: F11 inside `--app` mode escaped to real fullscreen and hid the bar. Fixed with `FullscreenAllowed: false` in the Chromium managed policy (`system/chromium/policies/managed/classpad-policy.json`); re-verified on real hardware that F11 is now a no-op.
 - **Website in-page navigation containment is still undecided.** `--app --incognito` plus Zscaler does not stop a child following a link off a curated site to uncontrolled content. The managed policy needs a `URLAllowlist` once the curated site list exists — not yet decided, see `pre-build-decisions.md` §3.
 - **Plugin trust model.** Plugin zips can carry an `install.sh` that runs with elevated privileges via `plugin-install.sh`. Treat plugin upload as an admin-only, trusted-input operation (enforced in the admin portal, Phase 8) — there is no sandboxing of plugin code in this design.
+- **Preseed USB provisioning — built 2026-08-06, not yet built-and-booted on real hardware.** `scripts/build-provisioning-iso.sh` has only been traced against the vendored generator's source and syntax-checked, not run end-to-end (needs `xorriso`/`isolinux` and a real AARNet fetch). Whether a root-run `nmtui` (`scripts/wifi-setup-interactive.sh`) creates a system-wide vs. session-scoped connection profile is also unverified — see "Provisioning / Imaging" above for both.
 - **`install.sh`'s deploy rsync can silently delete server-deployed plugins — found 2026-08-03, not yet fixed.** Step 3's `rsync -a --delete ... "$REPO_DIR"/ "$DEPLOY_DIR"/` excludes `machine_id`/`server_url`/`config_cache.json`/`documents` but not `plugins/` — it only ever anticipated the *bundled* plugins that ship in the git repo. Plugins installed dynamically by `scripts/plugin_deploy.py` (anything created via the admin portal's website-tile-creator, or otherwise not checked into the repo's `plugins/` directory) don't exist in `$REPO_DIR`, so `--delete` removes them from `$DEPLOY_DIR` on every re-run — discovered by re-running this exact rsync command by hand for a code-only redeploy and watching a just-created website tile vanish from `/opt/classpad/plugins/`. Not destructive in practice (the server's catalogue is authoritative; `plugin_deploy.py`'s next run reinstalls anything still enabled there), but silent and surprising, and worth a real fix — either exclude `plugins/` from this rsync entirely and let `plugin_deploy.py` own that whole directory, or something smarter. Needs a decision, not a reflexive patch.
 
 ---
@@ -285,24 +296,34 @@ classpad/
 │   │   ├── classpad-bar.service                 # user-level (classpad), Restart=always — added 2026-08-02
 │   │   ├── classpad-launcher.service           # user-level (classpad), the kiosk itself
 │   │   ├── classpad-plugin-deploy.service       # system-level (root) — Phase 10
-│   │   └── classpad-plugin-deploy.timer         # OnUnitActiveSec=5min
+│   │   ├── classpad-plugin-deploy.timer         # OnUnitActiveSec=5min
+│   │   ├── classpad-wifi-setup.service          # system-level (root), tty1, before lightdm — Provisioning, 2026-08-06
+│   │   └── lightdm.service.d/
+│   │       └── classpad-wifi-setup.conf         # Requires=/After= the unit above
 │   ├── xbindkeys/
 │   │   └── xbindkeysrc        # Ctrl+Alt+Shift+Escape recovery combo
 │   └── chromium/
 │       └── policies/
 │           └── managed/
 │               └── classpad-policy.json   # URLAllowlist — website navigation containment
+├── preseeds/
+│   └── classpad/
+│       └── preseed.cfg        # Debian installer preseed — AARNet mirror, wired-DHCP netcfg, late_command runs install.sh from the bundled repo
 ├── scripts/
 │   ├── install.sh             # First-time machine setup
 │   ├── plugin-install.sh      # Install/update a plugin from server
 │   ├── plugin_deploy.py       # Phase 10 — polls /plugins/, installs new/changed ones, root-only
-│   └── recovery.sh            # Called by xbindkeys to kill child processes
+│   ├── recovery.sh            # Called by xbindkeys to kill child processes
+│   ├── build-provisioning-iso.sh   # Builds the preseeded USB/ISO, injects a repo copy for offline install
+│   ├── wifi-setup-interactive.sh   # First-boot nmtui gate, run by classpad-wifi-setup.service
+│   └── vendor/                # gitignored — `debian-preseed-iso-generator` clone, fetched on demand
 └── tests/                     # pytest unit tests (run via python3-pytest, apt-installed)
     ├── test_plugin_manager.py
     ├── test_plugin_install.py
     ├── test_plugin_deploy.py
     ├── test_process_manager.py
     ├── test_recovery.py
+    ├── test_wifi_setup_interactive.py  # Fake curl/nmtui on PATH, same style as test_recovery.py
     ├── test_config.py         # Button grid layout math + Phase 9 server polling
     └── server/                # Flask-dependent tests, isolated from the client suite
         ├── conftest.py         # `flask = pytest.importorskip("flask")` at the top —
