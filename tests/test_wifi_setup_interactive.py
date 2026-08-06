@@ -70,6 +70,61 @@ def test_creates_marker_without_nmtui_when_already_reachable(tmp_path):
     assert "WiFi setup" not in result.stdout
 
 
+def test_answer_file_configures_wifi_without_nmtui(tmp_path):
+    marker = tmp_path / "state" / ".wifi-setup-done"
+    fakebin = tmp_path / "fakebin"
+    fakebin.mkdir()
+    state_file = tmp_path / "connected"
+
+    # curl "succeeds" only once state_file exists — i.e. only after the
+    # fake nmcli below has "added" the connection via the answer-file path.
+    make_fake_bin(fakebin, "curl", f'[ -f "{state_file}" ]')
+    # lsblk reports one removable device carrying the answer-file label.
+    make_fake_bin(fakebin, "lsblk", 'echo "/dev/fakedev CLASSPAD-WIFI"')
+    # mount "mounts" it by just writing a valid wifi-answers.env straight
+    # into the target directory (the last argument) — no real block device
+    # involved, matching this project's existing fake-binary test style.
+    make_fake_bin(
+        fakebin,
+        "mount",
+        'target="${@: -1}"\n'
+        "cat > \"$target/wifi-answers.env\" <<'ENVFILE'\n"
+        "CLASSPAD_WIFI_SSID=SchoolNet\n"
+        "CLASSPAD_WIFI_IDENTITY=kiosk\n"
+        "CLASSPAD_WIFI_PASSWORD=hunter2\n"
+        "ENVFILE\n",
+    )
+    make_fake_bin(fakebin, "umount", "exit 0")
+    make_fake_bin(
+        fakebin,
+        "nmcli",
+        f'if [ "$1" = "-t" ]; then exit 0; fi\n'
+        f'touch "{state_file}"\n',
+    )
+    # No nmtui on PATH at all — if the script ever fell through to the
+    # interactive wizard, it would fail with "command not found" instead
+    # of the clean exit this test asserts on.
+
+    result = subprocess.run(
+        ["bash", str(SCRIPT)],
+        cwd=fakebin,
+        env={
+            **os.environ,
+            "PATH": f"{fakebin}:{os.environ['PATH']}",
+            "CLASSPAD_WIFI_SETUP_MARKER": str(marker),
+            "CLASSPAD_WIFI_SETUP_SETTLE_SECONDS": "1",
+        },
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0
+    assert marker.exists()
+    assert "Found WiFi answer file" in result.stdout
+    assert "via WiFi answer file" in result.stdout
+    assert "WiFi setup" not in result.stdout  # the interactive banner never showed
+
+
 def test_invokes_nmtui_when_unreachable_then_stops_once_connected(tmp_path):
     marker = tmp_path / "state" / ".wifi-setup-done"
     fakebin = tmp_path / "fakebin"

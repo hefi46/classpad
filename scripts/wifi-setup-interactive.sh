@@ -10,7 +10,10 @@
 # common real case: a machine is imaged on a bench over wired Ethernet (see
 # preseeds/classpad/preseed.cfg) and only meets its actual classroom
 # WPA2-Enterprise network afterward, at which point whoever is physically
-# setting it up needs to pick the SSID and type credentials once.
+# setting it up needs to pick the SSID and type credentials once — or, for
+# a multi-machine rollout, plugs in a prebuilt "answer file" USB stick
+# instead (see try_answer_file below and scripts/write-wifi-answers-usb.sh)
+# and skips typing anything at all.
 #
 # Gated on actual network reachability, not on the presence of a specific
 # nmcli connection name — install.sh's own idempotency check cares about
@@ -30,6 +33,11 @@ set -euo pipefail
 
 MARKER="${CLASSPAD_WIFI_SETUP_MARKER:-/opt/classpad/.wifi-setup-done}"
 SETTLE_SECONDS="${CLASSPAD_WIFI_SETUP_SETTLE_SECONDS:-8}"
+ANSWER_LABEL="${CLASSPAD_WIFI_ANSWERS_LABEL:-CLASSPAD-WIFI}"
+# Same directory as this script — scripts/install.sh deploys the whole repo
+# tree together, so wifi-configure.sh is always right next to it.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WIFI_CONFIGURE="$SCRIPT_DIR/wifi-configure.sh"
 
 have_network() {
     # A real reachability check against the thing that actually matters
@@ -37,6 +45,37 @@ have_network() {
     # connectivity check depends on a connectivity URL being configured,
     # which isn't guaranteed on a fresh image.
     curl --silent --fail --max-time 3 "http://classpad-admin:5000/plugins/" >/dev/null 2>&1
+}
+
+# Looks for a removable volume labeled CLASSPAD-WIFI carrying a
+# wifi-answers.env (same CLASSPAD_WIFI_* vars wifi-configure.sh already
+# understands, see that script) and, if found, sources it — letting the
+# caller configure WiFi non-interactively instead of showing the nmtui
+# wizard. Deliberately a SEPARATE stick from the reusable provisioning
+# ISO/USB (preseeds/classpad/preseed.cfg / build-provisioning-iso.sh)
+# rather than baked into it: the base image is meant to be shareable across
+# sites with no secrets on it, and this is the one artefact that's
+# site-specific — see scripts/write-wifi-answers-usb.sh for how to build
+# one and its plaintext-secret handling note.
+try_answer_file() {
+    local dev mnt found=1
+    mnt="$(mktemp -d)"
+    for dev in $(lsblk -rno PATH,LABEL 2>/dev/null | awk -v want="$ANSWER_LABEL" '$2==want{print $1}'); do
+        if mount -o ro "$dev" "$mnt" 2>/dev/null; then
+            if [ -f "$mnt/wifi-answers.env" ]; then
+                echo "Found WiFi answer file on $dev, configuring automatically..."
+                set -a
+                # shellcheck disable=SC1091
+                . "$mnt/wifi-answers.env"
+                set +a
+                found=0
+            fi
+            umount "$mnt" || true
+        fi
+        [ "$found" -eq 0 ] && break
+    done
+    rmdir "$mnt"
+    return "$found"
 }
 
 if [ -f "$MARKER" ]; then
@@ -54,6 +93,26 @@ for _ in $(seq 1 "$SETTLE_SECONDS"); do
     fi
     sleep 1
 done
+
+# Try a prebuilt answer-file USB before ever showing the interactive
+# wizard — if it's present, valid, and results in a working connection,
+# nobody needs to type anything.
+if try_answer_file; then
+    if bash "$WIFI_CONFIGURE"; then
+        for _ in $(seq 1 "$SETTLE_SECONDS"); do
+            if have_network; then
+                mkdir -p "$(dirname "$MARKER")"
+                touch "$MARKER"
+                echo "Network confirmed via WiFi answer file -- continuing startup."
+                exit 0
+            fi
+            sleep 1
+        done
+        echo "wifi-setup-interactive.sh: WiFi answer file was applied but the network still isn't reachable -- falling back to manual setup." >&2
+    else
+        echo "wifi-setup-interactive.sh: WiFi answer file was found but invalid -- see wifi-configure.sh output above. Falling back to manual setup." >&2
+    fi
+fi
 
 clear
 cat <<'BANNER'
