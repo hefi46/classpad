@@ -51,7 +51,7 @@ apt-get install -y \
 # install, not assumed.
 apt-get install -y \
     tuxpaint tuxtype tuxmath gcompris-qt cheese \
-    libreoffice-writer libreoffice-calc libreoffice-impress \
+    libreoffice-writer \
     luanti luanti-game-minetest
 
 echo "== [2/15] Creating $KIOSK_USER user =="
@@ -153,9 +153,7 @@ else
 fi
 
 echo "== [7/15] Disabling Ctrl+Alt+Fn VT switching =="
-# Found on real hardware (2026-07-31): a real Ctrl+Alt+F2 press dropped
-# straight to a text-mode console with no easy way back for a
-# non-technical teacher. See system/X11/xorg.conf.d/10-classpad-no-vtswitch.conf.
+# See system/X11/xorg.conf.d/10-classpad-no-vtswitch.conf.
 mkdir -p /etc/X11/xorg.conf.d
 cp "$DEPLOY_DIR/system/X11/xorg.conf.d/10-classpad-no-vtswitch.conf" \
     /etc/X11/xorg.conf.d/10-classpad-no-vtswitch.conf
