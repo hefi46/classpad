@@ -125,7 +125,7 @@
 ## 7. Machine Identity & Network
 
 - [x] Static IP or DHCP — DHCP, WPA2-Enterprise PEAP/TTLS (CLAUDE.md)
-- [x] Hostname naming scheme — `11e-<serialnumber>` from `dmidecode -s system-serial-number` (CLAUDE.md)
+- [x] Hostname naming scheme — `CPad<serialnumber>` from `dmidecode -s system-serial-number` (CLAUDE.md)
 - [ ] **FLAG** — `dmidecode -s system-serial-number` needs root and can return blank/`None` on some hardware. TODO Phase 11 runs this once during `install.sh` (root context, fine) — but write the result to a machine_id file at that point rather than re-deriving it live on every boot, in case a later boot runs the check without root.
 - [x] Individual vs. group configs — both supported, admin portal assigns "to a machine or group" (TODO Phase 8)
 - [x] Wired or wireless — wireless, PEAP/TTLS (CLAUDE.md)

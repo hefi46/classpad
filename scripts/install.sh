@@ -224,7 +224,7 @@ SERIAL="$(dmidecode -s system-serial-number 2>/dev/null | tr -d '[:space:]')"
 if [ -z "$SERIAL" ] || [ "$SERIAL" = "None" ]; then
     echo "install.sh: WARNING dmidecode returned no usable serial number; leaving hostname and machine_id untouched" >&2
 else
-    MACHINE_ID="11e-$SERIAL"
+    MACHINE_ID="CPad$SERIAL"
     hostnamectl set-hostname "$MACHINE_ID"
     # hostnamectl alone leaves /etc/hosts' 127.0.1.1 line pointing at the old
     # name — found on real hardware: harmless but every subsequent `sudo`
