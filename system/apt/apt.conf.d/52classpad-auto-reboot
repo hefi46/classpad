@@ -1,0 +1,28 @@
+// Installed as /etc/apt/apt.conf.d/52classpad-auto-reboot by
+// scripts/install.sh — a separate, higher-sorting drop-in rather than
+// editing the package-provided /etc/apt/apt.conf.d/50unattended-upgrades
+// conffile directly (same "don't touch package-owned config" rule
+// scripts/install.sh already follows for GRUB).
+//
+// Deliberately does not touch Unattended-Upgrade::Origins-Pattern: the
+// package's own 50unattended-upgrades already ships with only the
+// Debian-Security origin uncommented by default, which is exactly the
+// "security updates only" scope wanted here, and APT's config-list syntax
+// appends to an existing block rather than replacing it — overriding it
+// from this file would need an explicit `#clear` first for no benefit.
+//
+// Automatic-Reboot-WithUsers is the load-bearing line on this hardware:
+// the kiosk user is *always* "logged in" via LightDM autologin for as long
+// as the machine is powered on (see "No login" in CLAUDE.md's Key Design
+// Decisions), so without this, a security update that needs a reboot
+// (e.g. a kernel patch) would never get one — there is no "no users
+// logged in" moment for the default WithUsers=false behaviour to catch.
+//
+// 03:30 targets a time the classroom is guaranteed closed. The reboot
+// itself is safe and self-healing by design on this hardware: silent GRUB
+// boot + LightDM autologin + Restart=always on the bar/launcher units
+// bring the kiosk straight back to the home screen with no one there to
+// click through anything.
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:30";

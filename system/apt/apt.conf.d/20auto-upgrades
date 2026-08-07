@@ -1,0 +1,7 @@
+// Installed as /etc/apt/apt.conf.d/20auto-upgrades by scripts/install.sh.
+// Normally written by `dpkg-reconfigure unattended-upgrades`; installed
+// directly here because install.sh always runs apt-get with -y (see step
+// 1) and dpkg-reconfigure's debconf prompt never fires — installing the
+// unattended-upgrades package alone does not enable these periodic jobs.
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
