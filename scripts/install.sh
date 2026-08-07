@@ -18,10 +18,8 @@ fi
 # Pin PATH explicitly rather than trusting the caller's environment to
 # already include the sbin dirs — useradd/usermod/hostnamectl etc. live in
 # /usr/sbin. Found failing with "useradd: command not found" despite
-# genuinely running as root: some sudo `secure_path` configs, `su` without
-# `-`, and this script's own preseed late_command/`in-target` chroot
-# invocation (see preseeds/classpad/preseed.cfg) are none of them
-# guaranteed to hand down a PATH that includes it.
+# genuinely running as root: some sudo `secure_path` configs and `su`
+# without `-` are not guaranteed to hand down a PATH that includes it.
 export PATH="/usr/sbin:/usr/bin:/sbin:/bin:${PATH:-}"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -87,10 +85,10 @@ chown -R "$KIOSK_USER":"$KIOSK_USER" "$DEPLOY_DIR"
 
 echo "== [4/15] Configuring unattended security updates =="
 # These are unsupervised classroom kiosks with no admin regularly checking
-# in on them (same reasoning as the plugin-deploy timer and the WiFi
-# first-boot gate) — a missed Debian security update just sits there
-# forever unless something applies it on its own. Deliberately scoped to
-# security updates only, not all package updates: the apt-get install in
+# in on them (same reasoning as the plugin-deploy timer below) — a missed
+# Debian security update just sits there forever unless something applies
+# it on its own. Deliberately scoped to security updates only, not all
+# package updates: the apt-get install in
 # step 1 already pulled in unattended-upgrades, and its own
 # package-provided /etc/apt/apt.conf.d/50unattended-upgrades (a conffile —
 # never edited by this script, same "don't touch package-owned config"
@@ -107,8 +105,8 @@ cp "$DEPLOY_DIR/system/apt/apt.conf.d/52classpad-auto-reboot" \
     /etc/apt/apt.conf.d/52classpad-auto-reboot
 # Package postinst already enables this, but doing it explicitly matches
 # this script's existing pattern of not assuming a package default holds
-# (e.g. the plugin-deploy timer and WiFi setup service below are both
-# explicitly enabled too) and keeps this step idempotent on its own.
+# (e.g. the plugin-deploy timer below is also explicitly enabled) and
+# keeps this step idempotent on its own.
 systemctl enable --now unattended-upgrades.service
 
 echo "== [5/15] Installing Chromium managed policy =="
@@ -225,8 +223,8 @@ else
 fi
 
 echo "== [12/15] WiFi (WPA2-Enterprise PEAP/MSCHAPv2) =="
-# Logic lives in wifi-configure.sh (extracted 2026-08-06) — shared with
-# wifi-setup-interactive.sh's answer-file path, see that script's header.
+# Logic lives in wifi-configure.sh (extracted 2026-08-06) so there's one
+# implementation of the nmcli connection-add call, not this step's own copy.
 bash "$DEPLOY_DIR/scripts/wifi-configure.sh"
 
 echo "== [13/15] Server URL override (Phase 9 polling) =="
@@ -246,23 +244,34 @@ else
     echo "install.sh: CLASSPAD_SERVER_URL not set, using the classpad-admin default" >&2
 fi
 
-echo "== [14/15] Installing first-boot WiFi setup gate =="
-# System-level, root, runs on tty1 before lightdm — see
-# system/systemd/classpad-wifi-setup.service and scripts/wifi-setup-interactive.sh
-# for the full reasoning. Only fires if the machine can't already reach
-# classpad-admin (e.g. this install ran with CLASSPAD_WIFI_SSID set above,
-# or on a wired network) — it's a fallback for the case where WiFi
-# credentials weren't known at install time, not a mandatory step.
-cp "$DEPLOY_DIR/system/systemd/classpad-wifi-setup.service" \
-    /etc/systemd/system/classpad-wifi-setup.service
-mkdir -p /etc/systemd/system/lightdm.service.d
-cp "$DEPLOY_DIR/system/systemd/lightdm.service.d/classpad-wifi-setup.conf" \
-    /etc/systemd/system/lightdm.service.d/classpad-wifi-setup.conf
-systemctl daemon-reload
-systemctl enable classpad-wifi-setup.service
-
-echo "== [15/15] Enabling autologin =="
+echo "== [14/15] Enabling autologin =="
 mkdir -p /etc/lightdm/lightdm.conf.d
 cp "$DEPLOY_DIR/system/lightdm/lightdm.conf" /etc/lightdm/lightdm.conf.d/50-classpad.conf
+# A minimal `tasksel standard`-only base install (no desktop task) leaves
+# the system's default systemd target at multi-user.target — installing the
+# lightdm *package* alone doesn't change that, it only enables
+# lightdm.service *within* graphical.target's dependency tree, which is
+# never reached unless graphical.target is actually the boot target.
+# `set-default` is an offline, symlink-only operation — safe and cheap to
+# run unconditionally here regardless of how minimal the underlying OS
+# install was. Idempotent: a no-op if already set.
+systemctl set-default graphical.target
 
-echo "install.sh: done. Reboot to apply the hostname change and log in as $KIOSK_USER."
+echo "== [15/15] Rebooting =="
+# A reboot is genuinely required, not just a nicety: the hostname change
+# (step 11/15), the GRUB/VT-switch config (steps 6-7/15), and the LightDM
+# autologin drop-in just written above only take effect on a fresh boot.
+# Leaving this to whoever runs install.sh (a teacher or IT volunteer, not
+# necessarily anyone technical — see the "no admin regularly checking in"
+# reasoning elsewhere in this file) risks the machine sitting half-applied
+# indefinitely, so this reboots automatically rather than just printing a
+# reminder.
+#
+# CLASSPAD_SKIP_REBOOT opts out, for the test suite / anyone re-running
+# this by hand who wants to inspect the result before rebooting.
+if [ -n "${CLASSPAD_SKIP_REBOOT:-}" ]; then
+    echo "install.sh: done. CLASSPAD_SKIP_REBOOT is set, skipping automatic reboot — reboot manually to apply the hostname change and log in as $KIOSK_USER."
+else
+    echo "install.sh: done. Rebooting now to apply the hostname change and log in as $KIOSK_USER."
+    reboot
+fi

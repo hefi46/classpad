@@ -299,15 +299,12 @@ the launcher's own window/mixer pattern.
 
 ## Phase 16: Imaging & Deployment
 
-**Approach decided 2026-08-06: preseed-based USB provisioning, not golden-image/Clonezilla/`dd`.** See CLAUDE.md's "Provisioning / Imaging" section for the full design (`preseeds/classpad/preseed.cfg`, `scripts/build-provisioning-iso.sh`, `scripts/wifi-setup-interactive.sh`). Superseded, not just deferred — the items below replace the old Clonezilla/`dd` line rather than sitting alongside it.
+**Preseed-based USB provisioning was tried (2026-08-06), built out further (2026-08-07), then removed in full the same day — back to an open question, not golden-image/Clonezilla/`dd` either (that was never built).** See CLAUDE.md's "Provisioning / Imaging" section for what existed and why it was reverted. WiFi setup specifically is getting a fresh design pass (the removed interactive first-boot TUI + answer-file USB are gone with it) — the items below are back to genuinely open, not a checklist against a decided approach.
 
-- [x] Decide imaging/cloning strategy — preseed USB, built and documented 2026-08-06 (was the open item in `pre-build-decisions.md` §1)
-- [ ] `scripts/build-provisioning-iso.sh` has not yet been run end-to-end (needs `xorriso`/`isolinux` + a real AARNet fetch) — do this before relying on it
-- [ ] Test imaging one machine from scratch using the built ISO on real 11e hardware
-- [ ] Verify on real hardware: `nmtui` (run as root, first-boot WiFi gate) creates a system-wide connection profile, not a session-scoped one — flagged as unverified in `scripts/wifi-setup-interactive.sh`
-- [ ] Verify on real hardware: the WiFi answer-file USB (`scripts/write-wifi-answers-usb.sh` / `try_answer_file()` in `wifi-setup-interactive.sh`) actually detects and mounts a real labeled stick — only exercised against faked `lsblk`/`mount` in tests so far
-- [ ] Verify: new machine boots, sets its own hostname from serial number, connects to WiFi (via the first-boot gate), registers with server, downloads assigned plugins
-- [ ] Generate a real crypted password for `preseeds/classpad/preseed.cfg`'s `sysadmin` account (`mkpasswd -m sha-512`) before building an ISO for actual use — the checked-in value is a non-functional placeholder
+- [ ] Decide imaging/cloning strategy — open again (was briefly "resolved" 2026-08-06 as preseed USB; reverted 2026-08-07)
+- [ ] Decide WiFi provisioning approach — open again (was briefly a first-boot interactive `nmtui` gate + answer-file USB; reverted 2026-08-07). `scripts/wifi-configure.sh`'s env-var-driven `nmcli` call (from `install.sh`'s own WiFi step) is the only WiFi-configuration path that still exists.
+- [ ] Test imaging one machine from scratch on real 11e hardware, once an approach is decided
+- [ ] Verify: new machine boots, sets its own hostname from serial number, connects to WiFi, registers with server, downloads assigned plugins
 - [ ] Document the teacher onboarding process (add machine to server, assign plugins)
 
 ---

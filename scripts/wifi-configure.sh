@@ -2,25 +2,16 @@
 # Adds the classpad-school-wifi NetworkManager connection from
 # CLASSPAD_WIFI_SSID/IDENTITY/PASSWORD/CA_CERT in the environment.
 #
-# Extracted out of install.sh's own WiFi step (2026-08-06) so there is
-# exactly one implementation of this nmcli invocation, not two copies to
-# keep in sync — wifi-setup-interactive.sh's answer-file path (see below)
-# needs the identical logic, and this project has already been bitten once
-# by a "two lists that must match by hand" bug (see CLAUDE.md's
-# process-kill-list history) to want a second instance of that here.
-#
-# Callers:
-#   - scripts/install.sh's WiFi step — CLASSPAD_WIFI_* already set from the
-#     environment install.sh itself was invoked with (test/dev override, or
-#     a site that knows its creds at install time).
-#   - scripts/wifi-setup-interactive.sh's answer-file path — sources a
-#     wifi-answers.env found on a labeled USB stick, which sets the same
-#     four variables, then calls this script.
+# Extracted out of install.sh's own WiFi step (2026-08-06) into its own
+# script mainly for readability — install.sh's WiFi step is the only
+# caller: CLASSPAD_WIFI_* already set from the environment install.sh
+# itself was invoked with (test/dev override, or a site that knows its
+# creds at install time).
 #
 # Deliberately never fatal for the "no SSID configured" case (exits 0) —
-# both callers treat WiFi as optional/best-effort, not a hard requirement.
-# Exits non-zero only for genuine misconfiguration (SSID set but
-# IDENTITY/PASSWORD missing), same as before this was extracted.
+# WiFi is treated as optional/best-effort at install time, not a hard
+# requirement. Exits non-zero only for genuine misconfiguration (SSID set
+# but IDENTITY/PASSWORD missing).
 
 set -euo pipefail
 
