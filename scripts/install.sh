@@ -26,6 +26,24 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="/opt/classpad"
 KIOSK_USER="classpad"
 
+# Found running this script from preseeds/classpad/preseed.cfg's
+# late_command (d-i's `in-target`, i.e. a chroot with no PID 1 systemd
+# actually running): `systemctl enable --now <unit>`/`daemon-reload` try to
+# talk to a live systemd over D-Bus and fail outright there, which — under
+# `set -e` above — aborts this whole script partway through, well before
+# reaching the graphical.target step near the end. `enable` alone is
+# symlink-only and safe in a chroot (the unit still starts normally on the
+# real first boot); only the "start it right now" half needs skipping.
+# /run/systemd/system only exists under a live, running systemd — see
+# systemd.exec(5) — so it's what d-i's own chroot itself lacks and a normal
+# post-boot invocation of this script always has.
+enable_and_start_if_live() {
+    systemctl enable "$1"
+    if [ -d /run/systemd/system ]; then
+        systemctl start "$1"
+    fi
+}
+
 echo "== [1/15] Installing apt dependencies =="
 apt-get update
 # python3-xlib is required by bar/bar.py (see requirements.txt) but was
@@ -107,7 +125,7 @@ cp "$DEPLOY_DIR/system/apt/apt.conf.d/52classpad-auto-reboot" \
 # this script's existing pattern of not assuming a package default holds
 # (e.g. the plugin-deploy timer below is also explicitly enabled) and
 # keeps this step idempotent on its own.
-systemctl enable --now unattended-upgrades.service
+enable_and_start_if_live unattended-upgrades.service
 
 echo "== [5/15] Installing Chromium managed policy =="
 mkdir -p /etc/chromium/policies/managed
@@ -191,8 +209,10 @@ cp "$DEPLOY_DIR/system/systemd/classpad-plugin-deploy.service" \
     /etc/systemd/system/classpad-plugin-deploy.service
 cp "$DEPLOY_DIR/system/systemd/classpad-plugin-deploy.timer" \
     /etc/systemd/system/classpad-plugin-deploy.timer
-systemctl daemon-reload
-systemctl enable --now classpad-plugin-deploy.timer
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+fi
+enable_and_start_if_live classpad-plugin-deploy.timer
 
 echo "== [10/15] Setting default volume =="
 # Boots muted at 0% on this hardware with no visible error (found on real

@@ -12,7 +12,7 @@
 - [x] Python version — 3.11+ (CLAUDE.md)
 - [x] Auto-login display manager — LightDM confirmed (CLAUDE.md, TODO Phase 11)
 - [ ] Single OS image for all machines, or per-machine variants? — still open
-- [ ] Imaging/cloning strategy — briefly resolved 2026-08-06 as preseed-based USB provisioning, then reverted in full 2026-08-07 (not Clonezilla/`dd` either — never built). Open again. See CLAUDE.md "Provisioning / Imaging" and TODO Phase 16.
+- [x] Imaging/cloning strategy — preseed-based USB provisioning, v2, decided 2026-08-07 (`scripts/build-provisioning-usb.sh`/`.ps1`, no ISO rebuild). v1 (2026-08-06) was reverted 2026-08-07; v2 is a different, simpler design (see CLAUDE.md "Provisioning / Imaging"), not Clonezilla/`dd` either. Unit-tested against a synthetic USB tree, not yet against real hardware/media — see TODO Phase 16.
 
 ---
 
