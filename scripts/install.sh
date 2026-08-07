@@ -28,7 +28,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEPLOY_DIR="/opt/classpad"
 KIOSK_USER="classpad"
 
-echo "== [1/14] Installing apt dependencies =="
+echo "== [1/15] Installing apt dependencies =="
 apt-get update
 # python3-xlib is required by bar/bar.py (see requirements.txt) but was
 # missing from CLAUDE.md's original required-packages list — added here
@@ -38,7 +38,7 @@ apt-get install -y \
     python3 python3-pip python3-pygame \
     python3-gi python3-gi-cairo gir1.2-gtk-3.0 python3-xlib \
     chromium git curl rsync xbindkeys x11-utils xdotool \
-    alsa-utils network-manager fonts-quicksand
+    alsa-utils network-manager fonts-quicksand unattended-upgrades
 
 # Binaries for the curated apps server/seed_plugins.py (2026-08-05) puts in
 # every fresh server's plugin catalogue — a seeded catalogue entry only
@@ -56,7 +56,7 @@ apt-get install -y \
     libreoffice-writer libreoffice-calc libreoffice-impress \
     luanti luanti-game-minetest
 
-echo "== [2/14] Creating $KIOSK_USER user =="
+echo "== [2/15] Creating $KIOSK_USER user =="
 if ! id -u "$KIOSK_USER" >/dev/null 2>&1; then
     # Groups mirror what `adduser` grants a normal Debian desktop user by
     # default (checked against the dev account on this same image) — audio
@@ -65,11 +65,11 @@ if ! id -u "$KIOSK_USER" >/dev/null 2>&1; then
     useradd --create-home --shell /bin/bash --groups audio,video,plugdev "$KIOSK_USER"
 fi
 
-echo "== [3/14] Deploying repo to $DEPLOY_DIR =="
+echo "== [3/15] Deploying repo to $DEPLOY_DIR =="
 mkdir -p "$DEPLOY_DIR"
 # machine_id/server_url/config_cache.json are runtime-generated, not part of
 # the repo — --delete would wipe them on every re-run otherwise (machine_id
-# gets rewritten in step 7 and server_url in step 9 anyway if their env vars
+# gets rewritten in step 11 and server_url in step 13 anyway if their env vars
 # are set, but config_cache.json has no such regeneration step, and any of
 # the three set via an env var not present on a given re-run would otherwise
 # just vanish, contradicting this script's "safe to re-run" claim). documents/
@@ -85,12 +85,38 @@ rsync -a --delete \
     "$REPO_DIR"/ "$DEPLOY_DIR"/
 chown -R "$KIOSK_USER":"$KIOSK_USER" "$DEPLOY_DIR"
 
-echo "== [4/14] Installing Chromium managed policy =="
+echo "== [4/15] Configuring unattended security updates =="
+# These are unsupervised classroom kiosks with no admin regularly checking
+# in on them (same reasoning as the plugin-deploy timer and the WiFi
+# first-boot gate) — a missed Debian security update just sits there
+# forever unless something applies it on its own. Deliberately scoped to
+# security updates only, not all package updates: the apt-get install in
+# step 1 already pulled in unattended-upgrades, and its own
+# package-provided /etc/apt/apt.conf.d/50unattended-upgrades (a conffile —
+# never edited by this script, same "don't touch package-owned config"
+# rule as GRUB below) ships with only the Debian-Security origin
+# uncommented by default, not the plain Debian origin. See
+# system/apt/apt.conf.d/ for why the two drop-ins below don't try to
+# override that. Runs after the repo deploy above since both drop-ins are
+# checked-in files copied from $DEPLOY_DIR, same pattern as the Chromium
+# policy and X11 drop-in below.
+mkdir -p /etc/apt/apt.conf.d
+cp "$DEPLOY_DIR/system/apt/apt.conf.d/20auto-upgrades" \
+    /etc/apt/apt.conf.d/20auto-upgrades
+cp "$DEPLOY_DIR/system/apt/apt.conf.d/52classpad-auto-reboot" \
+    /etc/apt/apt.conf.d/52classpad-auto-reboot
+# Package postinst already enables this, but doing it explicitly matches
+# this script's existing pattern of not assuming a package default holds
+# (e.g. the plugin-deploy timer and WiFi setup service below are both
+# explicitly enabled too) and keeps this step idempotent on its own.
+systemctl enable --now unattended-upgrades.service
+
+echo "== [5/15] Installing Chromium managed policy =="
 mkdir -p /etc/chromium/policies/managed
 cp "$DEPLOY_DIR/system/chromium/policies/managed/classpad-policy.json" \
     /etc/chromium/policies/managed/classpad-policy.json
 
-echo "== [5/14] Silencing GRUB menu (always boot the current kernel) =="
+echo "== [6/15] Silencing GRUB menu (always boot the current kernel) =="
 # Kiosk machines have no one present to pick an entry, and a raw whole-disk
 # clone of the golden image carries /etc/default/grub and the generated
 # /boot/grub/grub.cfg forward unchanged onto every machine it's imaged onto —
@@ -128,7 +154,7 @@ else
     echo "install.sh: WARNING /etc/default/grub not found (non-GRUB bootloader?); skipping silent-boot config" >&2
 fi
 
-echo "== [6/14] Disabling Ctrl+Alt+Fn VT switching =="
+echo "== [7/15] Disabling Ctrl+Alt+Fn VT switching =="
 # Found on real hardware (2026-07-31): a real Ctrl+Alt+F2 press dropped
 # straight to a text-mode console with no easy way back for a
 # non-technical teacher. See system/X11/xorg.conf.d/10-classpad-no-vtswitch.conf.
@@ -136,7 +162,7 @@ mkdir -p /etc/X11/xorg.conf.d
 cp "$DEPLOY_DIR/system/X11/xorg.conf.d/10-classpad-no-vtswitch.conf" \
     /etc/X11/xorg.conf.d/10-classpad-no-vtswitch.conf
 
-echo "== [7/14] Installing systemd user units and openbox autostart =="
+echo "== [8/15] Installing systemd user units and openbox autostart =="
 mkdir -p /etc/systemd/user
 cp "$DEPLOY_DIR/system/systemd/classpad-launcher.service" \
     /etc/systemd/user/classpad-launcher.service
@@ -159,7 +185,7 @@ install -o "$KIOSK_USER" -g "$KIOSK_USER" -m 755 \
     "$DEPLOY_DIR/system/openbox/autostart" \
     "/home/$KIOSK_USER/.config/openbox/autostart"
 
-echo "== [8/14] Installing plugin deployment timer (Phase 10) =="
+echo "== [9/15] Installing plugin deployment timer (Phase 10) =="
 # System-level (/etc/systemd/system/), not the user-level unit dir above —
 # runs as root deliberately: plugin install.sh scripts are expected to run
 # with elevated privileges (see CLAUDE.md's Plugin System trust model), so
@@ -172,12 +198,12 @@ cp "$DEPLOY_DIR/system/systemd/classpad-plugin-deploy.timer" \
 systemctl daemon-reload
 systemctl enable --now classpad-plugin-deploy.timer
 
-echo "== [9/14] Setting default volume =="
+echo "== [10/15] Setting default volume =="
 # Boots muted at 0% on this hardware with no visible error (found on real
 # hardware, see CLAUDE.md) — 70% matches the bar's default slider position.
 amixer sset Master 70% unmute >/dev/null
 
-echo "== [10/14] Setting hostname from serial number =="
+echo "== [11/15] Setting hostname from serial number =="
 SERIAL="$(dmidecode -s system-serial-number 2>/dev/null | tr -d '[:space:]')"
 if [ -z "$SERIAL" ] || [ "$SERIAL" = "None" ]; then
     echo "install.sh: WARNING dmidecode returned no usable serial number; leaving hostname and machine_id untouched" >&2
@@ -198,12 +224,12 @@ else
     chown "$KIOSK_USER":"$KIOSK_USER" "$DEPLOY_DIR/machine_id"
 fi
 
-echo "== [11/14] WiFi (WPA2-Enterprise PEAP/MSCHAPv2) =="
+echo "== [12/15] WiFi (WPA2-Enterprise PEAP/MSCHAPv2) =="
 # Logic lives in wifi-configure.sh (extracted 2026-08-06) — shared with
 # wifi-setup-interactive.sh's answer-file path, see that script's header.
 bash "$DEPLOY_DIR/scripts/wifi-configure.sh"
 
-echo "== [12/14] Server URL override (Phase 9 polling) =="
+echo "== [13/15] Server URL override (Phase 9 polling) =="
 # Optional — launcher/config.py defaults to http://classpad-admin:5000
 # (DEFAULT_SERVER_URL) if nothing overrides it, relying on this site's local
 # DNS to resolve that name. Only set CLASSPAD_SERVER_URL for testing or a
@@ -220,7 +246,7 @@ else
     echo "install.sh: CLASSPAD_SERVER_URL not set, using the classpad-admin default" >&2
 fi
 
-echo "== [13/14] Installing first-boot WiFi setup gate =="
+echo "== [14/15] Installing first-boot WiFi setup gate =="
 # System-level, root, runs on tty1 before lightdm — see
 # system/systemd/classpad-wifi-setup.service and scripts/wifi-setup-interactive.sh
 # for the full reasoning. Only fires if the machine can't already reach
@@ -235,7 +261,7 @@ cp "$DEPLOY_DIR/system/systemd/lightdm.service.d/classpad-wifi-setup.conf" \
 systemctl daemon-reload
 systemctl enable classpad-wifi-setup.service
 
-echo "== [14/14] Enabling autologin =="
+echo "== [15/15] Enabling autologin =="
 mkdir -p /etc/lightdm/lightdm.conf.d
 cp "$DEPLOY_DIR/system/lightdm/lightdm.conf" /etc/lightdm/lightdm.conf.d/50-classpad.conf
 
