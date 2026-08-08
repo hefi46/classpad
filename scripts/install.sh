@@ -45,6 +45,21 @@ enable_and_start_if_live() {
 }
 
 echo "== [1/15] Installing apt dependencies =="
+# Strip the installer's own `deb cdrom:...` source before updating --
+# found failing on real hardware (2026-08-09) when install.sh runs from
+# preseed's late_command. At that point in d-i's finish-install sequence
+# (the 07preseed hook), the CD-ROM apt source added during the base
+# install is still present in the target's sources.list, and d-i's own
+# cleanup of it (finish-install.d/10apt-cdrom-setup) hasn't run yet --
+# that hook runs at prefix "10", strictly after our "07preseed" hook.
+# `apt-get update` then fails outright ("E: ... does not have a Release
+# file", exit 100) even though the real mirror sources -- also already
+# configured by this point -- succeed individually: apt-get treats any
+# one failed source as fatal for the whole run, aborting this script at
+# step 1 of 15 under set -e. Harmless no-op on a normal post-boot run,
+# where apt-cdrom-setup has already removed this line by the time a
+# human or a re-run invokes this script.
+sed -i '/^deb cdrom:/Id' /etc/apt/sources.list
 apt-get update
 # python3-xlib is required by bar/bar.py (see requirements.txt) but was
 # missing from CLAUDE.md's original required-packages list — added here

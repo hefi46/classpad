@@ -37,6 +37,13 @@
     Name of the preseed under preseeds/<name>/preseed.cfg. Defaults to
     "classpad".
 
+.PARAMETER Password
+    Optional plaintext password to hash via WSL2's mkpasswd. If not provided,
+    $env:CLASSPAD_USER_PASSWORD_CRYPTED must be set to a pre-generated hash.
+
+.EXAMPLE
+    .\build-provisioning-usb.ps1 -TargetDrive E:\ -Password "yourpassword"
+
 .EXAMPLE
     $env:CLASSPAD_USER_PASSWORD_CRYPTED = '$6$...'
     .\build-provisioning-usb.ps1 -TargetDrive E:\
@@ -47,7 +54,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$TargetDrive,
 
-    [string]$PreseedName = "classpad"
+    [string]$PreseedName = "classpad",
+
+    [string]$Password
 )
 
 $ErrorActionPreference = "Stop"
@@ -95,11 +104,22 @@ if (-not (Test-Path $PreseedTemplate)) {
 
 # See preseeds/classpad/preseed.cfg's header: the committed template must
 # never carry a real crypted password, so it's substituted in at USB-write
-# time from an env var instead. Generate one with: mkpasswd -m sha-512
-# (Linux/WSL2 -- there's no Windows-native equivalent of mkpasswd).
-$UserPasswordCrypted = $env:CLASSPAD_USER_PASSWORD_CRYPTED
-if ([string]::IsNullOrEmpty($UserPasswordCrypted)) {
-    Fail "`$env:CLASSPAD_USER_PASSWORD_CRYPTED is not set. Generate one with: mkpasswd -m sha-512 (in WSL2)"
+# time from an env var or the -Password parameter. If -Password is provided,
+# hash it via WSL2's mkpasswd.
+if (-not [string]::IsNullOrEmpty($Password)) {
+    if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) {
+        Fail "WSL2 is required to hash -Password. Either install WSL2, or set `$env:CLASSPAD_USER_PASSWORD_CRYPTED to a pre-generated hash."
+    }
+    Write-Host "Generating SHA-512 crypt hash via WSL2..."
+    $UserPasswordCrypted = (wsl mkpasswd -m sha-512 $Password).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($UserPasswordCrypted)) {
+        Fail "Failed to generate password hash via 'wsl mkpasswd'. Ensure mkpasswd is installed in your WSL2 distribution (apt install whois)."
+    }
+} else {
+    $UserPasswordCrypted = $env:CLASSPAD_USER_PASSWORD_CRYPTED
+    if ([string]::IsNullOrEmpty($UserPasswordCrypted)) {
+        Fail "Either -Password or `$env:CLASSPAD_USER_PASSWORD_CRYPTED must be provided. Use -Password for plaintext (hashed via WSL2) or set the env var to a pre-generated hash."
+    }
 }
 
 foreach ($cmd in @("git")) {
