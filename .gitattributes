@@ -1,0 +1,35 @@
+# Force LF line endings for text files, regardless of the checking-out
+# machine's own git core.autocrlf setting. .gitattributes wins over that
+# per-machine setting for any path it matches.
+#
+# Why this exists: this repo's provisioning pipeline spans Windows (the
+# PowerShell ISO-writing tool used to build the classroom USB) and
+# Linux/WSL2 (the 11e client, the server dev box). A Windows checkout with
+# the common Git-for-Windows default core.autocrlf=true silently converts
+# every text file to CRLF on checkout, with zero visible symptom until
+# something actually executes the result.
+#
+# Found 2026-08-08: a CRLF-corrupted scripts/install.sh, staged onto a
+# provisioning ISO by that Windows tooling, broke on its own
+# `set -euo pipefail` (line 2) during a real preseed late_command run —
+# `set` read the option as "pipefail<CR>", rejected it as invalid, and
+# bash terminated the whole non-interactive script immediately with status
+# 2 (the "failed with exit code 2" red screen). Every other line in the
+# file carried the same trailing-CR-glued-to-last-token corruption, so this
+# wasn't a one-line fix — see CLAUDE.md's Provisioning / Imaging section.
+* text=auto eol=lf
+
+*.sh text eol=lf
+*.py text eol=lf
+*.cfg text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+
+# Binary assets — never touched by line-ending normalization, listed
+# explicitly so `text=auto`'s own binary detection isn't the only thing
+# standing between these and corruption.
+*.png binary
+*.wav binary
+*.zip binary
+*.ico binary
+*.jpg binary
